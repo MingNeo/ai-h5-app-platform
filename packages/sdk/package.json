@@ -1,0 +1,16 @@
+{
+  "name": "@app-platform/sdk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "files": ["dist", "platform.d.ts"],
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@app-platform/shared": "workspace:*",
+    "esbuild": "^0.27.0"
+  }
+}

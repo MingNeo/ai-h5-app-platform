@@ -1,0 +1,9 @@
+{
+  "name": "新应用",
+  "requireLogin": false,
+  "orientation": "portrait",
+  "capabilities": [],
+  "bizApis": [],
+  "dependencies": [],
+  "collections": {}
+}

@@ -1,0 +1,25 @@
+{
+  "name": "app-platform",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel --filter @app-platform/server --filter @app-platform/admin-web dev",
+    "dev:server": "pnpm --filter @app-platform/server dev",
+    "dev:admin": "pnpm --filter @app-platform/admin-web dev",
+    "build": "pnpm -r build",
+    "build:sdk": "pnpm --filter @app-platform/sdk build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "vitest run",
+    "seed": "pnpm --filter @app-platform/server seed"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "tsx": "^4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

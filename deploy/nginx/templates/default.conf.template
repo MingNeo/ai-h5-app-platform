@@ -1,0 +1,72 @@
+# 由 nginx 官方镜像在启动时用 envsubst 渲染（只替换已定义的环境变量）
+# APP_BASE_DOMAIN     例：local.example.test
+# APP_BASE_DOMAIN_RE  例：local\.example\.test
+# SERVER_UPSTREAM     平台 server，例：host.docker.internal:3000 或 server:3000
+# ADMIN_UPSTREAM      后台前端，本地开发指向 Vite（host.docker.internal:5173），整套容器模式指向 server:3000
+
+map $http_upgrade $connection_upgrade {
+  default upgrade;
+  ''      close;
+}
+
+server {
+  listen 80;
+  server_name _;
+  return 301 https://$host$request_uri;
+}
+
+# 后台
+server {
+  listen 443 ssl;
+  http2 on;
+  server_name admin.${APP_BASE_DOMAIN};
+
+  ssl_certificate     /etc/nginx/certs/cert.pem;
+  ssl_certificate_key /etc/nginx/certs/key.pem;
+  client_max_body_size 12m;
+
+  proxy_http_version 1.1;
+  proxy_set_header Host $host;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_set_header X-Forwarded-Proto https;
+
+  location /admin-api/ {
+    proxy_pass http://${SERVER_UPSTREAM};
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+  }
+
+  location / {
+    proxy_pass http://${ADMIN_UPSTREAM};
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_read_timeout 3600s;
+  }
+}
+
+# 应用：{appId}[--dev|--beta].<base>，全部交给 server（静态托管 / 预览代理 / 平台接口）
+server {
+  listen 443 ssl default_server;
+  http2 on;
+  server_name ~^[a-z0-9-]+\.${APP_BASE_DOMAIN_RE}$;
+
+  ssl_certificate     /etc/nginx/certs/cert.pem;
+  ssl_certificate_key /etc/nginx/certs/key.pem;
+  client_max_body_size 12m;
+
+  location / {
+    proxy_pass http://${SERVER_UPSTREAM};
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    # 预览 HMR WebSocket、AI 流式输出
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+  }
+}
