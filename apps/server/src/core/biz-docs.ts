@@ -1,7 +1,9 @@
-import { type BizApiEntry, findBizOperation, renderBizApiIndex, rewriteBizPath, specOperations } from '@app-platform/shared'
+import { type BizApiEntry, findBizOperation, generateBizApiDts, renderBizApiIndex, rewriteBizPath, specOperations } from '@app-platform/shared'
 import { config } from '../config'
 import { allowedBizPrefixes, approvedGrants, draftManifest } from './apps'
 import { col } from '../lib/mongo'
+
+export const BIZ_DTS_PATH = 'src/biz-api.d.ts'
 
 export interface CatalogEntry {
   prefix: string
@@ -93,6 +95,12 @@ export async function bizCatalogHint(appId: string) {
   if (catalog.length)
     lines.push(`- 平台目录里已登记的服务：${catalog.map(c => `${c.title}（${c.prefix}，${c.operations} 个接口）`).join('；')}`)
   return lines.join('\n')
+}
+
+/** 生成应用的 src/biz-api.d.ts，让类型检查能发现路径和返回类型写错 */
+export async function generatedFiles(appId: string): Promise<Record<string, string>> {
+  const { entries } = await bizContext(appId)
+  return { [BIZ_DTS_PATH]: generateBizApiDts(entries) }
 }
 
 /** env:NAME 形式的请求头取值替换成环境变量；变量缺失时跳过，避免把 "env:XXX" 原样发出去 */

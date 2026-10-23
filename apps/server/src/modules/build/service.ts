@@ -1,19 +1,22 @@
+import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { ACL_OPENNESS, type AppManifest, type CheckIssue, appUrl } from '@app-platform/shared'
 import { config } from '../../config'
 import { approvedGrants, invalidateApp } from '../../core/apps'
-import { bizCheckInput } from '../../core/biz-docs'
-import { checkSources, textSources } from '../../core/checks'
+import { bizCheckInput, generatedFiles } from '../../core/biz-docs'
+import { checkWorkspace } from '../../core/checks'
 import { createSnapshot } from '../../core/drafts'
+import { materialize } from '../../core/workspace'
 import { audit } from '../../lib/audit'
-import { chat } from '../../lib/llm'
 import { blobs } from '../../lib/blob'
+import { chat } from '../../lib/llm'
 import { col, type BuildDoc, type SnapshotFile } from '../../lib/mongo'
 import { store } from '../../lib/store'
 import { newId } from '../../lib/tokens'
 import { ensureIndexes } from '../gateway/data'
 import { notifyFeishu } from './notify'
 
-const SIZE_BUDGET = 2 * 1024 * 1024
+const SIZE_BUDGET = 3 * 1024 * 1024
 
 export async function requestBuild(appId: string, userId: string) {
   const running = await col.builds.findOne({ appId, status: { $in: ['queued', 'running'] } })
@@ -109,17 +112,30 @@ async function runBuild(build: BuildDoc) {
   const snap = await col.snapshots.findOne({ _id: build.snapshotId })
   if (!snap)
     throw new Error('快照不存在')
+  const root = join(config.dataDir, 'builds-src', build._id)
+  const outDir = join(config.dataDir, 'builds-out', build._id)
   try {
-    // 应用代码就是产物：不编译、不打包，只做校验
-    const res = await checkSources(await textSources(snap.files), { biz: await bizCheckInput(build.appId) })
+    await materialize(root, snap.files, await generatedFiles(build.appId))
+    const res = await checkWorkspace(root, { outDir, cacheDir: join(config.dataDir, 'vite-cache', `${build.appId}-build`), biz: await bizCheckInput(build.appId) })
     const issues = [...res.issues]
-    const sizeBytes = snap.files.reduce((n, f) => n + f.size, 0)
-    if (sizeBytes > SIZE_BUDGET)
-      issues.push({ source: 'syntax', severity: 'warning', message: `源码体积 ${(sizeBytes / 1024 / 1024).toFixed(1)}MB，超过建议值 2MB，首屏加载可能较慢` })
+    let files: SnapshotFile[] = []
+    let sizeBytes = 0
+    if (res.buildFiles.length) {
+      for (const f of res.buildFiles) {
+        if (f.path.endsWith('.map'))
+          continue
+        const { hash, size } = await blobs.put(readFileSync(join(outDir, f.path)))
+        files.push({ path: f.path, hash, size })
+        sizeBytes += size
+      }
+      if (sizeBytes > SIZE_BUDGET)
+        issues.push({ source: 'build', severity: 'warning', message: `产物体积 ${(sizeBytes / 1024 / 1024).toFixed(1)}MB，超过建议值 3MB，首屏加载可能较慢` })
+    }
     const cmp = await compareManifest(build.appId, res.manifest)
     issues.push(...cmp.issues)
-    const ok = res.ok && snap.files.some(f => f.path === 'index.html')
-    const files: SnapshotFile[] = ok ? snap.files : []
+    const ok = res.ok && files.some(f => f.path === 'index.html')
+    if (!ok)
+      files = []
     const summary = ok ? await summarize(build.appId, snap.files, res.manifest) : ''
     await col.builds.updateOne({ _id: build._id }, {
       $set: { status: ok ? 'success' : 'failed', issues, files, sizeBytes, manifest: res.manifest ?? undefined, summary, confirmations: cmp.confirmations, finishedAt: new Date() },
@@ -133,9 +149,9 @@ async function runBuild(build: BuildDoc) {
     }
     void notifyFeishu(ok ? `【测试版已生成】${build.appId}，请负责人确认上线` : `【测试版生成失败】${build.appId}`)
   }
-  catch (e) {
-    console.error('[build] 校验失败', e)
-    throw e
+  finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(outDir, { recursive: true, force: true })
   }
 }
 
@@ -166,6 +182,7 @@ export async function kickBuilds() {
 }
 
 export async function startBuildWorker() {
+  mkdirSync(join(config.dataDir, 'builds-out'), { recursive: true })
   await col.builds.updateMany({ status: 'running' }, { $set: { status: 'queued' } })
   void kickBuilds()
   setInterval(() => void kickBuilds(), 5000).unref()

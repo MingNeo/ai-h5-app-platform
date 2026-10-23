@@ -16,9 +16,10 @@ nginx（线上 ingress / 本地 scripts/dev-proxy.mjs）
 server（Fastify，单进程，可水平扩容）
  ├ admin-api        后台接口
  ├ gateway          /__platform/*，应用同源接口
- ├ app-host         dev / beta / prod 静态源码
+ ├ app-host         prod / beta 静态产物
+ ├ preview          每个活跃应用一个 Vite dev server
  ├ agent            AI 轮次执行（同一应用串行）
- ├ build            发布前校验队列（进程内循环 + Redis 锁）
+ ├ build            构建队列（进程内循环 + Redis 锁）
  └ telemetry        埋点与预览运行时错误
         │
         ├ MongoDB        平台库 + 每个应用每环境一个库 + 内容寻址 blob
@@ -26,14 +27,13 @@ server（Fastify，单进程，可水平扩容）
         └ LLM 网关       OpenAI 兼容 Chat Completions
 ```
 
-进程角色由 `ROLES` 控制，默认 `api,build`（[config.ts](../apps/server/src/config.ts)、[main.ts](../apps/server/src/main.ts)）：
+进程角色由 `ROLES` 控制，默认 `api,preview,build`（[config.ts](../apps/server/src/config.ts)、[main.ts](../apps/server/src/main.ts)）：
 
 | 角色 | 启动内容 |
 |---|---|
 | `api` | HTTP 服务；启动时 `recoverTurns()` 清理上次卡住的 AI 轮次并继续排队任务 |
-| `build` | 发布前校验队列（启动时把 `running` 重置为 `queued`，之后每 5s 拉取） |
-
-预览不需要独立角色：草稿文件由 `api` 直接返回。
+| `preview` | 预览空闲回收器（每 60s 扫描，默认 30 分钟未访问即关闭） |
+| `build` | 构建队列循环（启动时把 `running` 重置为 `queued`，之后每 5s 拉取） |
 
 单进程部署最简单；拆多副本时必须配置 `REDIS_URL`，否则锁、限流和 pub/sub 只在本进程内生效。
 
@@ -43,17 +43,18 @@ server（Fastify，单进程，可水平扩容）
 apps/server          Fastify 服务端
   src/config.ts      环境变量解析
   src/app.ts         路由装配、路径解析、admin 静态资源、预览代理
-  src/core/          应用、草稿、快照、校验、业务接口文档
+  src/core/          应用、草稿、快照、工作区、校验、业务接口文档
   src/modules/
     admin/           后台登录、应用/成员、文件、数据台、能力审批、发布、监控
     gateway/         身份、数据库、KV、文件、业务代理、埋点
-    host/            dev / beta / prod 静态托管、平台运行时文件、CSP、占位页
+    host/            线上/测试版静态托管、CSP、占位页
+    preview/         Vite dev server 生命周期、HMR/HTTP 代理
     agent/           系统提示、工具、轮次执行、事件流、SSE 路由
     build/           构建、manifest 变更对比、发布、飞书通知
   src/lib/           mongo、blob、store(Redis/内存)、llm、http、token
 apps/admin-web       Vue3 + Element Plus + Monaco 后台与对话式 IDE
 packages/sdk         应用运行时 SDK，esbuild 打成单文件 dist/sdk.js
-packages/app-template 应用模板、平台前端运行时（dom/ui）、Tailwind 运行时
+packages/app-template 锁定的 Vite 配置、模板文件、依赖白名单
 packages/shared      manifest/DSL/事件协议/OpenAPI 解析
 packages/app-guard   生成代码安全扫描
 packages/agent-docs  给模型看的规则、SDK、manifest 文档
@@ -61,7 +62,7 @@ deploy/              Dockerfile、nginx 模板、本地证书
 scripts/             dev 编排、HTTPS 代理、冒烟测试
 ```
 
-运行时不执行应用代码：没有编译和打包，`index.html` 和 `src/**/*.js` 直接返回（仅对指向应用文件的根路径引用补 `/a/{appId}/` 前缀），浏览器直接执行。原子类由浏览器端的 `/__platform/tailwind.js` 扫描 DOM 生成；没有组件库，界面由原生标签 + Tailwind 组合，小工具从 `/__platform/dom.js` 导入（[packages/app-template/platform/index.mjs](../packages/app-template/platform/index.mjs)）。
+运行时不执行应用代码：预览和构建都只是 Vite 转换，且 `vite.config`、PostCSS、UnoCSS 配置由平台内联提供，应用工作区里的配置文件不会被加载（[packages/app-template/platform/index.mjs](../packages/app-template/platform/index.mjs)）。
 
 ## 3. 入口域名与请求分流
 
@@ -85,23 +86,24 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 
 `/*` 最终处理顺序：
 
-1. `admin` 路径 → 读 `apps/admin-web/dist`（`/admin` 前缀已剥离），SPA 路由回退 `index.html`。
-2. `dev` 渠道 → 校验预览 cookie，通过后由 `serveAppDraft()` 直接返回草稿文件。
-3. `prod` / `beta` → `serveAppBuild()` 返回对应构建记录里的文件清单（内容就是源码）。
+1. `admin` 路径 → 读 `apps/admin-web/dist`（`/admin` 前缀已剥离），SPA 路由回退 `index.html`；找不到构建产物时提示走 nginx。
+2. `dev` 渠道 → 校验预览 cookie，通过后代理到该应用的 Vite dev server（含 `/__vite_hmr`）。
+3. `prod` / `beta` → `serveAppBuild()` 从构建产物返回文件。
+
+WebSocket upgrade 只放行 `dev` 渠道的 `/__vite_hmr`，且必须带有效预览 cookie。
 
 ## 4. 应用托管
 
 ### 线上版与测试版
 
-应用源码以文件清单（path + blob hash）存在 `builds` 文档里，文件内容在 `blobs` 集合（内容寻址，SHA-256）。`serveAppBuild()`（[app-host.ts](../apps/server/src/modules/host/app-host.ts)）：
+构建产物以文件清单（path + blob hash）存在 `builds` 文档里，文件内容在 `blobs` 集合（内容寻址，SHA-256）。`serveAppBuild()`（[app-host.ts](../apps/server/src/modules/host/app-host.ts)）：
 
 - 应用文件挂在 `/a/{appId}[--channel]/` 下；`serveFiles()` 用去掉前缀后的路径查文件清单。
 - 文本文件（html/js/css/svg）里的根绝对引用会补上应用前缀，改写结果按构建 + 路径缓存；只改写能匹配到应用文件的路径。
-- `index.html` 缺少的平台标签由服务端注入：`boot.js?app=...&channel=...`、`ui.css`、`tailwind.js`。应用删掉也一定生效。
-- 三个渠道的 `index.html` 都返回 `no-store`；beta / prod 的其他文件 60s 缓存并带 ETag。
-- 未知无扩展名路径回退 `index.html`，支持 history 路由；多页应用可以直接放 `about.html` 或 `about/index.html`。
-- `.map` 一律 404；`admin.json` 也不通过应用路径返回。
-- 平台运行时文件由 [platform-assets.ts](../apps/server/src/modules/host/platform-assets.ts) 提供：`dom.js`、`ui.js`、`ui.css`、`tailwind.js`，都带一天缓存，路径保持根路径、跨应用共享。
+- `index.html` 若缺少 `/__platform/boot.js`，服务端在 `<head>` 前注入，并补上 `?app=...&channel=...`，保证 SDK 拿到应用身份。
+- 线上版 `index.html` 返回 `no-cache`，beta 返回 `no-store`；`/assets/*` 返回一年 immutable（带 ETag）；其他静态文件 60s。
+- 未知无扩展名路径回退 `index.html`，支持 history 路由。
+- `.map` 一律 404，不对外暴露源码映射；`admin.json` 也不通过应用路径返回。
 - 下线、未到活动时间、已结束、未发布时返回平台占位页。
 - 响应统一带 CSP 与安全头（[csp.ts](../apps/server/src/modules/host/csp.ts)）：`default-src 'self'`、`script-src 'self'`、`style-src 'self' 'unsafe-inline'`、`frame-src 'none'`、`frame-ancestors 'self'`。业务接口走同源代理，因此不需要放行业务域名。
 
@@ -109,9 +111,9 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 
 1. 后台调用 `POST /admin-api/apps/:appId/preview-url` 签发短期票据（普通 10 分钟，二维码 30 分钟），票据里带 appId 和渠道。
 2. 浏览器访问 `/__platform/preview-auth?t=...&next=...`，服务端校验票据后写入 `__Host-app_preview__{appId}` cookie（24h，HttpOnly、Secure、SameSite=Lax），再 302 到 `/a/{appId}--dev/{next}`。
-3. `dev` / `beta` 渠道的页面请求和平台接口都要求该 cookie；没有则返回「需要预览权限」占位页。
-4. 预览直接返回草稿文件（`serveAppDraft()`），没有 dev server、没有 HMR；刷新页面即可看到最新代码。
-5. `public/` 下的文件按应用根路径访问（各渠道一致）。
+3. `dev` / `beta` 渠道的页面请求、平台接口和 HMR 都要求该 cookie；没有则返回「需要预览权限」占位页。
+4. 每个应用首次访问时启动一个 Vite dev server（随机端口、独立进程内 server，`base` 为 `/a/{appId}--dev/`），工作区在 `DATA_DIR/workspaces/{appId}`。
+5. 草稿变化通过进程内 `draftEvents` 和 Redis/内存 pub/sub 同步到磁盘，Vite 负责 HMR。
 6. 预览身份可锁定为 `self` / `guest` / `test`，由票据声明；`guest` 和 `test` 会覆盖主站 cookie 的解析结果。
 7. cookie 名带 appId，可以同时预览多个应用；claims 里的 appId 也会校验，不能拿 A 的票据预览 B。
 
@@ -164,8 +166,6 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | 路径 | 说明 |
 |---|---|
 | `GET /__platform/boot.js` | 注入 `window.__APP_CONFIG__` 配置并返回 SDK 单文件 |
-| `GET /__platform/dom.js` `ui.js` `ui.css` | 平台前端工具与基础样式 |
-| `GET /__platform/tailwind.js` | Tailwind v4 浏览器运行时（扫描 DOM 生成原子类） |
 | `GET /__platform/preview-auth` | 预览票据换 cookie |
 | `GET /__platform/api/auth/me` | 当前用户 |
 | `POST /__platform/api/dev/mock-login` / `mock-logout` | 仅 mock 模式 |
@@ -237,7 +237,8 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `list_files` `read_file` `glob` `grep` | 读草稿 |
 | `write_file` `edit_file` `delete_file` `move_file` | 改草稿；`manifest.json` 写入前先校验 |
 | `todo_write` | 更新步骤清单 |
-| `check` | manifest + app-guard + 业务接口核对 + `node --check` 语法检查 |
+| `add_dependency` | 只能加白名单依赖并写进 `manifest.dependencies` |
+| `check` | manifest + app-guard + 业务接口核对 + `vue-tsc` + `vite build` |
 | `get_runtime_errors` | 读预览回传的 JS/console/接口/编译错误 |
 | `db_query` / `db_seed` | 只操作 dev 数据 |
 | `read_docs` | 读取 `agent-docs` 的规则、SDK、manifest 文档 |
@@ -267,10 +268,11 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 
 [core/checks.ts](../apps/server/src/core/checks.ts) 顺序执行：
 
-1. manifest 解析与 schema 校验；`index.html` 必须存在。
-2. app-guard 安全扫描：内联脚本、外链、`eval`、原生桥、相对导入缺扩展名、`.vue` 文件等。
+1. manifest 解析与 schema 校验。
+2. app-guard 安全扫描与依赖白名单检查（禁用依赖见 `GUARD_FORBIDDEN_PACKAGES`）。
 3. 业务接口调用核对：路径是否授权、是否在文档中、方法/参数名是否一致。
-4. `node --input-type=module --check -` 逐文件做语法解析（只解析，不执行）。
+4. `vue-tsc --noEmit`（90s 超时；超时降级为警告）。
+5. `vite build`（180s 超时），返回产物清单。
 
 错误阻断，警告不阻断。
 
@@ -279,9 +281,9 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 [build/service.ts](../apps/server/src/modules/build/service.ts)：
 
 - 同一应用同一时间只允许一个 `queued` / `running` 构建。
-- 构建前为草稿生成 `build` 快照，对快照源码执行 `checkSources`。
-- 没有编译产物：成功时把快照的文件清单直接记为构建文件，记录 `manifest`、体积、变更摘要、需确认项，并切换 `apps.betaBuildId`。
-- 源码超过 2MB 给警告；缺少 `index.html` 视为失败。
+- 构建前为草稿生成 `build` 快照，再把快照物化到临时目录执行 `checkWorkspace`。
+- 成功后把产物写入 `blobs`，记录 `manifest`、体积、变更摘要、需确认项，并切换 `apps.betaBuildId`。
+- 产物超过 3MB 给警告；缺少 `index.html` 视为失败。
 - 队列是进程内循环 + Redis `setNX` 锁，**不是**独立的 BullMQ worker；多副本可共存，靠锁互斥。
 - 构建完成发飞书通知。
 
@@ -333,9 +335,9 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | server 监听 |
 | `MONGO_URL` | `mongodb://127.0.0.1:27017/app_platform` | `memory` 启动内置 mongod |
 | `REDIS_URL` | 空 | 空则用进程内存 |
-| `DATA_DIR` | `.data` | 临时目录、内置 mongod 数据 |
+| `DATA_DIR` | `.data` | 工作区、Vite 缓存、构建临时目录 |
 | `SECRET` | 随机 | 后台会话和预览票据签名；不配置则重启失效 |
-| `ROLES` | `api,build` | 进程角色 |
+| `ROLES` | `api,preview,build` | 进程角色 |
 | `AUTH_PROVIDER` | `mock` | `mock` / `main-site` |
 | `AUTH_USERINFO_URL` | 空 | 主站登录服务用户信息接口地址（`AUTH_PROVIDER=main-site` 时必填） |
 | `AUTH_UID_FIELDS` | `uid,user_id` | 从用户信息响应里按顺序尝试取用户标识的字段名 |
@@ -358,6 +360,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `AGENT_MAX_AUTOFIX` | `3` | 自动修复轮数 |
 | `AGENT_DAILY_TOKENS_PER_USER` | `3000000` | 每人每日 token 上限 |
 | `UPLOAD_MAX_BYTES` | `5MB` | 上传大小 |
+| `PREVIEW_IDLE_MINUTES` | `30` | 预览空闲回收 |
 | `CDN_PURGE_URL` | 空 | 发布后刷新 CDN |
 
 容器识别（`APP_CONTAINERS`）：UA 命中某条规则时，`platform.env.container` 取该条的 `id`（例如 `app-a`、`app-b`），协议决定 SDK 走哪种原生调用方式；未命中任何规则的普通浏览器固定为 `browser`。
@@ -377,12 +380,12 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 
 | 设计稿 | 当前实现 |
 |---|---|
-| 独立 `build-worker`、BullMQ | 同进程校验循环 + Redis 锁；`ROLES` 可拆分部署，但代码未拆包 |
+| 独立 `build-worker`、BullMQ | 同进程构建循环 + Redis 锁；`ROLES` 可拆分部署，但代码未拆包 |
 | 对象存储（COS） | 默认全部存 Mongo `blobs`，接口已抽象为 `BlobStore`，后续可替换 |
-| 独立 `preview` StatefulSet | 不需要：草稿文件由 `api` 直接返回，没有 dev server 和 HMR |
+| 独立 `preview` StatefulSet | 同进程内 Vite dev server + 代理；`ROLES=preview` 只控制回收器 |
 | 每个应用一个子域 | 单域名 + `/a/{appId}/` 路径；运维只需一条 DNS、一张普通证书（应用间 origin 隔离随之放弃，见 security-boundary） |
 | 手写 demo 应用 | 模板初始化 + `make seed` 生成 demo |
-| Vue3 + Vant + 构建 | 纯 HTML + 原生 ESM；Tailwind v4 浏览器运行时，零编译零打包 |
+| Tailwind / 任意 HTML | 固定 Vue3 + Vant + UnoCSS；不支持纯 HTML 单页，不加载任何 CDN |
 
 ## 13. 运营后台与开放接口
 

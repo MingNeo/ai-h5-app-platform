@@ -19,9 +19,10 @@ import { registerMonitorRoutes } from './modules/admin/monitor'
 import { registerReleaseRoutes } from './modules/admin/release'
 import { registerAgentRoutes } from './modules/agent/routes'
 import { registerGateway } from './modules/gateway'
-import { serveAppBuild, serveAppDraft } from './modules/host/app-host'
+import { appPageHeaders, serveAppBuild } from './modules/host/app-host'
 import { placeholderPage } from './modules/host/pages'
 import { registerOpenApi } from './modules/openapi'
+import { proxyPreviewRequest, proxyPreviewUpgrade } from './modules/preview/manager'
 
 const ADMIN_DIST = join(config.repoRoot, 'apps/admin-web/dist')
 
@@ -60,7 +61,7 @@ export async function buildApp() {
   registerGateway(app)
   registerOpenApi(app)
 
-  // 后台静态资源、实时预览（直接返回草稿文件）、线上版 / 测试版
+  // 后台静态资源、实时预览（代理到 Vite dev server）、线上版 / 测试版
   app.route({
     method: ['GET', 'HEAD'],
     url: '/*',
@@ -80,10 +81,26 @@ export async function buildApp() {
       if (site.channel === 'dev') {
         if (!readPreviewClaims(req.headers.cookie, site.appId))
           return reply.status(403).type('text/html; charset=utf-8').send(placeholderPage('preview_forbidden'))
-        return serveAppDraft(req, reply)
+        const headers = await appPageHeaders(site.appId, 'dev', req.headers.host ?? '')
+        reply.hijack()
+        await proxyPreviewRequest(site.appId, req.raw, reply.raw, (_status, ct) => ({
+          ...headers,
+          'Content-Security-Policy': ct?.includes('text/html') ? headers['Content-Security-Policy']! : '',
+          'cache-control': 'no-store',
+        }))
+        return
       }
       return serveAppBuild(req, reply)
     },
+  })
+
+  app.server.on('upgrade', (req, socket, head) => {
+    const site = parseSite(req.headers.host, req.url ?? '/', config.baseDomain, config.devHosts)
+    if (site?.kind !== 'app' || site.channel !== 'dev' || !site.path.startsWith('/__vite_hmr') || !readPreviewClaims(req.headers.cookie, site.appId)) {
+      socket.destroy()
+      return
+    }
+    void proxyPreviewUpgrade(site.appId, req, socket, head)
   })
 
   return app

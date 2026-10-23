@@ -113,7 +113,7 @@ async function main() {
     await col.members.insertOne({ _id: newId(), appId: APP_ID, userId: user._id, role: 'owner', createdAt: now })
     await initDraft(APP_ID, '方案投票（演示）', user._id)
     await writeDraft(APP_ID, 'manifest.json', `${JSON.stringify({ ...MANIFEST, name: '方案投票（演示）' }, null, 2)}\n`, { userId: user._id })
-    await writeDraft(APP_ID, 'src/pages/home.js', VOTE_PAGE, { userId: user._id })
+    await writeDraft(APP_ID, 'src/pages/Home.vue', VOTE_PAGE, { userId: user._id })
     await writeDraft(APP_ID, 'admin.json', `${JSON.stringify({
       title: '投票后台',
       description: '查看投票情况、导出投票明细',

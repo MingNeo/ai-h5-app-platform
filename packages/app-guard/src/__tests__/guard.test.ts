@@ -3,7 +3,7 @@ import type { GuardOptions } from '../index'
 import { scanApp } from '../index'
 
 const opts: GuardOptions = {
-  baseDependencies: [],
+  baseDependencies: ['vue', 'vant'],
   optionalDependencies: ['phaser'],
   declaredDependencies: [] as string[],
   forbiddenFileRe: /^(?:vite\.config\.|package\.json$)/,
@@ -27,34 +27,28 @@ describe('app-guard', () => {
     ['非白名单依赖', 'import axios from "axios"'],
     ['node 模块', 'import fs from "node:fs"'],
   ])('拦截 %s', (_name, code) => {
-    expect(errors([{ path: 'src/a.js', content: code }]).length).toBeGreaterThan(0)
+    expect(errors([{ path: 'src/a.ts', content: code }]).length).toBeGreaterThan(0)
   })
 
   it('拦截配置里的禁用依赖', () => {
     const code = 'import { loginApp } from "native-login"'
     const allowedOpts = { ...opts, baseDependencies: [...opts.baseDependencies, 'native-login'] }
-    expect(errors([{ path: 'src/a.js', content: code }], { ...allowedOpts, forbiddenPackages: ['native-login'] }).length).toBe(1)
-    expect(errors([{ path: 'src/a.js', content: code }], allowedOpts)).toEqual([])
+    expect(errors([{ path: 'src/a.ts', content: code }], { ...allowedOpts, forbiddenPackages: ['native-login'] }).length).toBe(1)
+    expect(errors([{ path: 'src/a.ts', content: code }], allowedOpts)).toEqual([])
   })
 
   it('允许正常代码，忽略注释', () => {
     const code = `
-      import { el } from '/__platform/dom.js'
-      import { renderCard } from './Card.js'
-      import util from '@/utils.js'
+      import { ref } from 'vue'
+      import { showToast } from 'vant'
+      import Card from './Card.vue'
+      import util from '@/utils'
       // document.cookie 在注释里不算
       /* eval("x") */
       const s = 'eval is just a word'
       await platform.db.collection('votes').add({ a: 1 })
-      el('sl-button', { variant: 'primary' }, '投票')
     `
-    expect(errors([{ path: 'src/a.js', content: code }])).toEqual([])
-  })
-
-  it('拦截 .vue、框架依赖和缺扩展名的相对导入', () => {
-    expect(errors([{ path: 'src/Home.vue', content: '<template><div /></template>' }]).length).toBe(1)
-    expect(errors([{ path: 'src/a.js', content: 'import { ref } from "vue"' }])[0]).toContain('不支持 vue')
-    expect(errors([{ path: 'src/a.js', content: 'import { x } from "./lib"' }])[0]).toContain('必须带扩展名')
+    expect(errors([{ path: 'src/a.ts', content: code }])).toEqual([])
   })
 
   it('声明后允许白名单依赖', () => {
@@ -68,7 +62,7 @@ describe('app-guard', () => {
   })
 
   it('外部 fetch 给出警告', () => {
-    const issues = scanApp([{ path: 'src/a.js', content: 'fetch("https://api.example.com")' }], opts)
+    const issues = scanApp([{ path: 'src/a.ts', content: 'fetch("https://api.example.com")' }], opts)
     expect(issues.some(i => i.severity === 'warning')).toBe(true)
   })
 })
