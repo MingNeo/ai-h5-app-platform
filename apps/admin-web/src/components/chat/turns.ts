@@ -187,7 +187,6 @@ export const TOOL_LABEL: Record<string, string> = {
   edit_file: '修改',
   delete_file: '删除',
   move_file: '移动',
-  add_dependency: '添加依赖',
   check: '校验',
   get_runtime_errors: '查看运行时错误',
   db_query: '查询数据',
