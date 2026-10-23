@@ -10,7 +10,7 @@ import { pushDevError } from '../../core/dev-errors'
 import { previewCookieName, previewCookieValue, readPreviewClaims, verifyPreviewTicket } from '../../core/preview-access'
 import { blobs } from '../../lib/blob'
 import { err } from '../../lib/errors'
-import { ok } from '../../lib/http'
+import { ok, parseCookies } from '../../lib/http'
 import { UPLOAD_MIME } from '../../lib/mime'
 import { appCollection, col } from '../../lib/mongo'
 import { rateLimit } from '../../lib/store'
@@ -103,7 +103,14 @@ async function identity(req: FastifyRequest) {
 async function dataCtx(req: FastifyRequest): Promise<DataCtx> {
   const c = req.appCtx!
   const [id, manifest] = await Promise.all([identity(req), effectiveManifest(c.appId, c.channel)])
-  return { appId: c.appId, env: dataEnvOf(c.channel), manifest, user: id.user }
+  return {
+    appId: c.appId,
+    env: dataEnvOf(c.channel),
+    manifest,
+    user: id.user,
+    vid: parseCookies(req.headers.cookie).app_vid,
+    ip: req.ip,
+  }
 }
 
 function cookieDomain() {

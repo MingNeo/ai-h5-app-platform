@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api, ApiError } from '../../api'
 import { useAppStore } from '../../stores/app'
-import CodeEditor from '../editor/CodeEditor.vue'
 import DiffDialog from '../editor/DiffDialog.vue'
+import EditorSkeleton from '../editor/EditorSkeleton.vue'
+
+/** Monaco 体积大：切到代码页时才加载，期间显示骨架屏 */
+const CodeEditor = defineAsyncComponent({
+  loader: () => import('../editor/CodeEditor.vue'),
+  loadingComponent: EditorSkeleton,
+  delay: 120,
+})
 
 const props = defineProps<{ appId: string }>()
 const store = useAppStore()
@@ -22,6 +29,10 @@ const rev = ref(0)
 const isText = ref(true)
 const isLocked = ref(false)
 const saving = ref(false)
+/** 文件列表首次加载 */
+const filesLoading = ref(true)
+/** 正在拉取文件内容 */
+const opening = ref(false)
 const remoteChanged = ref(false)
 const showHistory = ref(false)
 const snapshots = ref<Array<{ id: string, kind: string, message: string, createdAt: string, createdBy: string }>>([])
@@ -57,19 +68,26 @@ const tree = computed<TreeNode[]>(() => {
 })
 
 async function loadFiles() {
-  const res = await api<{ files: FileItem[], locked?: Array<{ path: string }> }>(`/apps/${props.appId}/files`, { quiet: true })
-  files.value = res.files ?? []
-  locked.value = res.locked ?? []
-  if (current.value && !isLocked.value) {
-    const f = res.files.find(x => x.path === current.value)
-    if (!f) {
-      current.value = null
+  if (!files.value.length)
+    filesLoading.value = true
+  try {
+    const res = await api<{ files: FileItem[], locked?: Array<{ path: string }> }>(`/apps/${props.appId}/files`, { quiet: true })
+    files.value = res.files ?? []
+    locked.value = res.locked ?? []
+    if (current.value && !isLocked.value) {
+      const f = res.files.find(x => x.path === current.value)
+      if (!f) {
+        current.value = null
+      }
+      else if (f.rev !== rev.value) {
+        if (dirty.value)
+          remoteChanged.value = true
+        else await open(f.path)
+      }
     }
-    else if (f.rev !== rev.value) {
-      if (dirty.value)
-        remoteChanged.value = true
-      else await open(f.path)
-    }
+  }
+  finally {
+    filesLoading.value = false
   }
 }
 
@@ -82,14 +100,20 @@ async function open(path: string) {
       return
     }
   }
-  const res = await api<{ path: string, rev: number, locked: boolean, encoding: string, content: string }>(`/apps/${props.appId}/files/content`, { query: { path } })
-  current.value = path
-  isText.value = res.encoding === 'utf8'
-  isLocked.value = res.locked
-  content.value = isText.value ? res.content : ''
-  original.value = content.value
-  rev.value = res.rev
-  remoteChanged.value = false
+  opening.value = true
+  try {
+    const res = await api<{ path: string, rev: number, locked: boolean, encoding: string, content: string }>(`/apps/${props.appId}/files/content`, { query: { path } })
+    current.value = path
+    isText.value = res.encoding === 'utf8'
+    isLocked.value = res.locked
+    content.value = isText.value ? res.content : ''
+    original.value = content.value
+    rev.value = res.rev
+    remoteChanged.value = false
+  }
+  finally {
+    opening.value = false
+  }
 }
 
 async function save() {
@@ -219,7 +243,13 @@ onBeforeUnmount(() => clearInterval(pollTimer))
           版本
         </el-button>
       </div>
+      <div v-if="filesLoading && !files.length" class="flex-1 p-3">
+        <div class="animate-pulse flex flex-col gap-2.5">
+          <div v-for="(w, i) in ['76%', '52%', '64%', '88%', '44%', '70%']" :key="i" class="h-3 rounded bg-[var(--border)]" :style="{ width: w }" />
+        </div>
+      </div>
       <el-tree
+        v-else
         :data="tree" node-key="path" :props="{ label: 'label', children: 'children' }"
         :current-node-key="current ?? undefined" highlight-current default-expand-all :expand-on-click-node="true"
         class="flex-1 overflow-auto scroll-thin text-13px py-1"
@@ -258,11 +288,13 @@ onBeforeUnmount(() => clearInterval(pollTimer))
             </el-button>
           </template>
         </el-alert>
-        <div v-if="!isText" class="flex-1 flex items-center justify-center text-[var(--muted)]">
+        <EditorSkeleton v-if="opening" class="flex-1 min-h-0" label="正在加载文件…" />
+        <div v-else-if="!isText" class="flex-1 flex items-center justify-center text-[var(--muted)]">
           二进制文件，不能在线编辑
         </div>
         <CodeEditor v-else v-model="content" :path="current" :readonly="isLocked || !canEdit" class="flex-1 min-h-0" />
       </template>
+      <EditorSkeleton v-else-if="opening || filesLoading" class="flex-1 min-h-0" />
       <div v-else class="flex-1 flex items-center justify-center text-[var(--muted)]">
         在左侧选择文件
       </div>
