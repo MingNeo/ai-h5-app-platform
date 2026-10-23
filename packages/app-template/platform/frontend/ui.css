@@ -104,20 +104,27 @@
     opacity: 1;
   }
 
-  /* ---------- 原生 dialog（ui.js 的 dialog() 用这套） ---------- */
+  /* ---------- 确认框（ui.js 的 dialog() 用这套，纯 div，不是原生 <dialog>） ---------- */
+
+  .ui-dialog-mask {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+  }
 
   .ui-dialog {
     width: calc(100% - 48px);
     max-width: 320px;
-    padding: 0;
-    border: 0;
     border-radius: 14px;
     background: var(--ui-surface);
     color: var(--ui-text);
-  }
-
-  .ui-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.45);
   }
 
   .ui-dialog-title {

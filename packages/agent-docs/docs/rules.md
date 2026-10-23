@@ -6,12 +6,15 @@
 
 **应用是纯 HTML + 原生 ES 模块。没有编译、没有打包、没有 npm 依赖。**
 
-- 页面结构写在 `index.html` 和 `src/**/*.js` 里，浏览器直接运行你写的代码。改完刷新即生效，不存在“构建失败”这种问题。
+- 页面结构写在 `index.html` 和 `src/**/*.js` 里，浏览器直接运行你写的代码。改完刷新即生效，不存在"构建失败"这种问题。
 - 不要写 `.vue`、`.ts`、`.tsx`，也不要 import 任何 npm 包（vue、react、vant 等一律不可用）。
+- **兼容性底线：Safari 12（iOS 12）起步，覆盖现在主流移动端/PC 浏览器和 App 内嵌 WebView。代码不经编译直接跑在浏览器里，没有 polyfill、没有降级，写了不支持的语法/API 就是直接报错或交互失效**：
+  - 不要用可选链 `?.` 和空值合并 `??`（Safari 12 不支持，语法错误直接白屏）。要写判断就用 `a && a.b`、`x || 默认值`，或者先取出来判断 `== null`。
+  - 不要用原生 `<dialog>` + `.showModal()`、`popover` 属性 + `popovertarget`（旧内核完全不认，不是样式退化，是整个交互点不开）。自定义弹窗/面板/下拉改用一个 `fixed inset-0`（写成 `top-0 right-0 bottom-0 left-0`，`inset` 简写 Safari 12 也不支持）的遮罩 div + 内容 div，配合一个布尔状态自己控制显示隐藏。
 - **不要自己写 `<script src="/__platform/...">`、`<link>` 引用平台运行时**：平台在返回 `index.html` 时自动注入以下内容，直接使用即可：
   - `/__platform/boot.js`：注入全局对象 `platform`（SDK）
   - `/__platform/tailwind.js`：Tailwind v4 浏览器运行时，扫描 DOM 里的类名生成样式
-  - `/__platform/ui.css`：设计令牌（`--ui-*`）、重置、页面容器、轻提示和原生 dialog 样式
+  - `/__platform/ui.css`：设计令牌（`--ui-*`）、重置、页面容器、轻提示和确认框样式
 - 原子类就是 Tailwind：`flex items-center gap-2 p-4 text-sm text-gray-500 rounded-xl bg-white`，也支持 `p-[10px]`、`bg-[var(--ui-primary)]` 这类任意值。**只能写静态类名**：类名必须在源码里以字面量出现，`'p-' + n` 这种运行时拼接不会被扫描到。
 - **没有组件库**。界面直接用原生标签 + Tailwind 组合；平台只提供下面几个高频交互，避免重复踩坑：
 
@@ -19,27 +22,25 @@
   |---|---|
   | 轻提示 | `toast('已保存')` |
   | 确认框 | `await dialog({ title: '删除？', content: '不可恢复', danger: true, confirmText: '删除' })` |
-  | 弹窗 / 底部面板 | 原生 `<dialog>` + `.showModal()`，平台样式类 `ui-dialog` / `ui-dialog-title` / `ui-dialog-body` / `ui-dialog-actions` |
+  | 弹窗 / 底部面板 | 自己写一个 `fixed` 遮罩 div + 内容 div，配合一个状态变量 toggle 显隐；不要用原生 `<dialog>` |
   | 折叠 | `<details><summary>标题</summary>…</details>` |
-  | 下拉 / 气泡 | 原生 `popover` 属性 + `popovertarget` |
+  | 下拉 / 气泡 | 自己写一个绝对定位的 div，点击切换 class 控制显隐；不要用 `popover` 属性 |
   | 加载 / 进度 | `<progress class="w-full h-2 accent-[var(--ui-primary)]">`、骨架屏用 `animate-pulse` |
   | 底部导航 | 固定定位 + `pb-[env(safe-area-inset-bottom)]` + 三个 flex 项自己写 |
   | 开关 / 勾选 | 原生 `<input type="checkbox" class="...">`，或用 `peer` + `peer-checked:` 做自定义外观 |
 
 - 平台提供的小工具：
   - `import { el, mount, $, $$, clear, delegate, esc } from '/__platform/dom.js'`：创建节点、挂载、事件委托、转义
-  - `import { toast, dialog } from '/__platform/ui.js'`：轻提示、确认框（原生 `<dialog>` 实现，自带焦点和 ESC）
+  - `import { toast, dialog } from '/__platform/ui.js'`：轻提示、确认框（div + CSS 实现，自带 ESC 关闭，不依赖原生 `<dialog>`）
 
-## 目录结构与子路由
+## 目录结构与页面导航
 
 ```
 index.html          应用外壳：标题、meta、<div id="app"> 和入口 <script type="module" src="/src/app.js">
 manifest.json       应用配置：名称、是否强制登录、数据集合（ACL/字段/索引/限制）、能力、业务接口
 admin.json          可选：应用后台视图（给运营看的数据页）
-src/app.js          入口：注册路由并挂载
-src/router.js       平台提供的客户端路由（嵌套路由），入口已接好，一般不用改
-src/layouts/*.js    布局：接收 child() 渲染子页面，放公共导航
-src/pages/*.js      页面模块，导出一个返回 DOM 节点的函数
+src/app.js          入口：按应用需求组织界面与交互
+src/pages/*.js      可选：页面模块，导出返回 DOM 节点的函数
 src/components/*.js 可复用片段
 src/styles.css      应用自己的 CSS（可选）
 src/assets/         图片等素材
@@ -49,9 +50,8 @@ public/             静态文件（按应用根路径访问，/logo.png → publ
 规则：
 
 - 文件只能放在 `src/`、`public/` 下，或者是根目录的 `index.html`、`manifest.json`、`admin.json`。
-- **页面用子路由组织**：在 `src/app.js` 的路由表里加 `children`，页面写成 `src/pages/*.js`；布局组件里调用 `child()` 渲染子页面。需要独立整页时才用多页 HTML。
-- 子路由的 `path` 不要以 `/` 开头（`''` 表示布局根路径，`about` 表示 `/about`）；页面内跳转用 `<a href={href('/about')}>`（`href` 来自 `src/router.js`）或 `router.navigate('/about')`，不要写死 `/a/...`。
-- 平台已自动拦截站内 `<a>` 点击并走 history 路由；外链加 `data-external` 属性。
+- **页面组织按需求选择**：简单应用可直接在 `index.html` 或 `src/app.js` 渲染；需要独立整页时使用多个 HTML；需要客户端导航时，由应用自行选择并实现路由，不依赖平台内置 router。
+- 不要把 `/a/{appId}` 写死在应用链接中。平台会把应用内根路径资源映射到当前 app/channel 前缀；自定义 history 路由需按 `window.__APP_CONFIG__.base` 处理应用挂载路径。
 - **相对导入必须带 `.js` 扩展名**：`import { renderHome } from './pages/home.js'`。浏览器不会自动补全。
 - `/__platform/...` 下的平台文件路径保持不变，平台会自动注入入口脚本，不需要自己写 `<script src="/__platform/...">`。
 - 不要创建 `package.json`、`vite.config.*`、`postcss.config.*`、`uno.config.*`、`tailwind.config.*`、`.env` 等工具链配置文件，平台会拒绝。

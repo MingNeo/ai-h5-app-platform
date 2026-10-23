@@ -93,5 +93,5 @@ export function delegate(root, type, selector, handler) {
 
 /** 文本转义，拼 HTML 字符串时用；优先用 el()/文本节点，天然安全 */
 export function esc(value) {
-  return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c])
+  return String(value == null ? '' : value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', '\'': '&#39;' })[c])
 }

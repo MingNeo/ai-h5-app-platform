@@ -1,5 +1,5 @@
 // 平台轻提示与确认框。样式在 /__platform/ui.css。
-// 其他交互（抽屉、标签页、下拉）用原生 <dialog> / <details> / <popover> 配合 Tailwind 自己写。
+// 其他交互（抽屉、标签页、下拉）配合 Tailwind 自己用 div 写；不用原生 <dialog>——旧内核（如 Safari 12）不支持 showModal()。
 import { el } from './dom.js'
 
 let wrap = null
@@ -13,7 +13,7 @@ export function toast(message, opts = {}) {
   const node = el('div', { class: 'ui-toast' }, String(message))
   wrap.append(node)
   requestAnimationFrame(() => node.classList.add('ui-open'))
-  const duration = opts.duration ?? 2000
+  const duration = opts.duration == null ? 2000 : opts.duration
   const close = () => {
     node.classList.remove('ui-open')
     setTimeout(() => node.remove(), 220)
@@ -27,39 +27,42 @@ export function toast(message, opts = {}) {
   }
 }
 
-/** 确认框，返回 Promise<boolean>；只传字符串时当作正文 */
+/** 确认框，返回 Promise<boolean>；只传字符串时当作正文。纯 div + CSS 弹层，不依赖原生 <dialog> */
 export function dialog(opts) {
-  const o = typeof opts === 'string' ? { content: opts } : (opts ?? {})
+  const o = typeof opts === 'string' ? { content: opts } : (opts == null ? {} : opts)
   return new Promise((resolve) => {
     let settled = false
-    const node = el('dialog', { class: 'ui-dialog' }, [
-      o.title ? el('div', { class: 'ui-dialog-title' }, o.title) : null,
-      o.content ? el('div', { class: 'ui-dialog-body' }, o.content) : null,
-      el('div', { class: 'ui-dialog-actions' }, [
-        o.cancelText === null
-          ? null
-          : el('button', { class: 'ui-dialog-btn', onClick: () => finish(false) }, o.cancelText ?? '取消'),
-        el('button', {
-          class: `ui-dialog-btn ui-dialog-btn-${o.danger ? 'danger' : 'primary'}`,
-          onClick: () => finish(true),
-        }, o.confirmText ?? '确定'),
+    const mask = el('div', { class: 'ui-dialog-mask' }, [
+      el('div', { class: 'ui-dialog' }, [
+        o.title ? el('div', { class: 'ui-dialog-title' }, o.title) : null,
+        o.content ? el('div', { class: 'ui-dialog-body' }, o.content) : null,
+        el('div', { class: 'ui-dialog-actions' }, [
+          o.cancelText === null
+            ? null
+            : el('button', { class: 'ui-dialog-btn', onClick: () => finish(false) }, o.cancelText == null ? '取消' : o.cancelText),
+          el('button', {
+            class: `ui-dialog-btn ui-dialog-btn-${o.danger ? 'danger' : 'primary'}`,
+            onClick: () => finish(true),
+          }, o.confirmText == null ? '确定' : o.confirmText),
+        ]),
       ]),
     ])
+    // ESC 或浏览器返回时按取消处理（原生 dialog 自带这个行为，div 实现需要自己接）
+    const onKeydown = (e) => {
+      if (e.key === 'Escape')
+        finish(false)
+    }
     const finish = (ok) => {
       if (settled)
         return
       settled = true
-      node.close()
+      document.removeEventListener('keydown', onKeydown)
+      mask.remove()
+      document.body.classList.remove('ui-no-scroll')
       resolve(ok)
     }
-    // ESC 或浏览器关闭时按取消处理
-    node.addEventListener('close', () => finish(false))
-    document.body.append(node)
+    document.addEventListener('keydown', onKeydown)
+    document.body.append(mask)
     document.body.classList.add('ui-no-scroll')
-    node.showModal()
-    node.addEventListener('close', () => {
-      node.remove()
-      document.body.classList.remove('ui-no-scroll')
-    })
   })
 }

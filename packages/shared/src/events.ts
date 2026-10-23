@@ -13,7 +13,7 @@ export interface FileChange {
 }
 
 export interface CheckIssue {
-  source: 'guard' | 'syntax' | 'build' | 'manifest' | 'runtime' | 'biz'
+  source: 'guard' | 'syntax' | 'build' | 'manifest' | 'runtime' | 'biz' | 'route'
   severity: 'error' | 'warning'
   message: string
   file?: string

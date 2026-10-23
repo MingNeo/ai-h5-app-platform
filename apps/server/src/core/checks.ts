@@ -78,6 +78,43 @@ async function checkSyntaxAll(files: SourceFile[]) {
   return issues
 }
 
+const PAGE_FILE_RE = /^src\/pages\/.+\.(?:js|mjs)$/
+
+/**
+ * 应用显式采用 src/router.js 路由约定时，src/pages/*.js 应被 src/app.js import 并在 routes
+ * 里用到；没有采用该约定的应用不做路由检查。这里只做文本层面的静态检查，不执行应用代码。
+ */
+function checkRoutes(files: SourceFile[]): CheckIssue[] {
+  const appFile = files.find(f => f.path === 'src/app.js')
+  if (!appFile || !files.some(f => f.path === 'src/router.js'))
+    return []
+  const issues: CheckIssue[] = []
+  for (const page of files.filter(f => PAGE_FILE_RE.test(f.path))) {
+    const rel = page.path.slice('src/'.length).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const importRe = new RegExp(`import\\s*(?:\\{([^}]+)\\}|(\\w+))\\s*from\\s*['"]\\.\\.?\\/${rel}['"]`)
+    const m = importRe.exec(appFile.content)
+    if (!m) {
+      issues.push({
+        source: 'route',
+        severity: 'error',
+        file: page.path,
+        message: '这个页面没有被 src/app.js import。若应用使用 src/router.js 路由，请在 routes 的 children 里加一条 { path, component }，并在 src/app.js 头部 import 对应的渲染函数。',
+      })
+      continue
+    }
+    const names = (m[1] ?? m[2] ?? '').split(',').map(s => s.trim().split(/\s+as\s+/).pop()!).filter(Boolean)
+    if (names.length && !names.some(n => new RegExp(`\\b${n}\\b`).test(appFile.content.slice(m.index + m[0].length)))) {
+      issues.push({
+        source: 'route',
+        severity: 'error',
+        file: page.path,
+        message: 'src/app.js 已经 import 了这个页面，但没在 routes 里用到（没作为 component/layout）。若应用使用 src/router.js 路由，请检查 routes 的 children 配置。',
+      })
+    }
+  }
+  return issues
+}
+
 export interface CheckResult {
   ok: boolean
   issues: CheckIssue[]
@@ -103,6 +140,8 @@ export async function checkSources(files: SourceFile[], opts: { biz?: BizCheckIn
   }
   if (!files.some(f => f.path === 'index.html'))
     issues.push({ source: 'manifest', severity: 'error', file: 'index.html', message: '缺少 index.html（应用入口页）' })
+
+  issues.push(...checkRoutes(files))
 
   issues.push(...scanApp(files, {
     baseDependencies: BASE_DEPENDENCIES,
