@@ -5,7 +5,7 @@
 ## 0. Context
 内部员工在后台用在线 vibe coding（对话式界面，类似 Codex / Claude）生成 H5 应用，发布到 `apps.example.com/a/{appId}/`，运行在 App WebView 和手机浏览器里。平台要保证：
 - 应用只能访问自身文件和平台提供的接口；
-- 每个应用自动登录（复用主站账号），401 自动拦截到全局登录，登录后重放请求；
+- 每个应用默认游客可访问；需要用户身份的操作遇 401 自动拦截到全局登录，登录后重放请求；`manifest.requireLogin` 可让整个应用先登录；
 - 每个应用有独立的数据存储。
 
 当前仓库是全新项目，尚无历史代码。本地开发不依赖 Docker；部署用 `deploy/Dockerfile` 出镜像。
@@ -59,7 +59,7 @@ v2 相对 v1 方案的变化：
   <link rel="stylesheet" href="/__platform/ui.css">
   <script src="/__platform/tailwind.js"></script>
   ```
-  即使 AI 删掉了平台引用，每个应用也一定带着自动登录和 401 拦截。
+  即使 AI 删掉了平台引用，每个应用也一定带着登录检查和 401 拦截。
 - 应用挂在 `/a/{appId}[--channel]/` 下；源码里的根绝对引用在返回时补前缀（只改写能对应到应用文件的路径）。
 - `/assets/*` 返回 immutable 长缓存，`index.html` 返回 no-cache；未知路径回退 index.html。下线或不在排期内时，返回平台占位页。
 - 静态文件：线上从对象存储读（可加 CDN），本地读磁盘 volume。
@@ -138,7 +138,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 ## 7. 数据存储（MongoDB）
 - 平台库 `platform`：`apps`、`app_members`、`drafts`、`snapshots`、`builds`、`releases`、`grants`、`biz_api_catalog`、`agent_sessions`、`agent_events`、`audit_logs`、`telemetry_*`（TTL）。
 - 应用库：每个「应用 × 环境」一个库 `appdata_{appId}_{dev|prod}`，含系统集合 `_kv_user`、`_kv_app`、`_files`。系统字段由服务端写入。
-- ACL 预设：`private` / `public_read` / `submit_only` / `readonly` / `admin_only`；ajv 校验 schema（`additionalProperties:false`）；支持 `unique`、`limits`、`moderate`（公开文本过内容安全）。
+- ACL 预设：`private` / `public_read` / `submit_only` / `public_submit` / `public_write` / `readonly` / `admin_only`；ajv 校验 schema（`additionalProperties:false`）；支持 `unique`、`limits`、`moderate`（公开文本过内容安全）。
 - 查询 DSL 白名单：`$eq $ne $gt $gte $lt $lte $in $nin $exists $and $or`，深度 ≤ 3；`limit` ≤ 100；`maxTimeMS` 2000。prod 环境的排序和 count 只能用声明了索引的字段。
 - 环境：预览和测试版用 dev 库，线上用 prod 库。发布时只做增量（新增集合、新增索引）；放宽 ACL 要在审批时确认。
 - 后台数据台：浏览、编辑、导出，`readonly` 种子数据可从 dev 同步到 prod。
@@ -185,7 +185,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
   - 模型下拉框；「先出方案再改」开关：打开后 AI 先只读分析、给出方案卡片，用户点「按此执行」后才动代码。
 - 消息操作：悬停后显示「复制」「重新生成」「从这里回滚」。
 - 会话栏：新建会话、重命名、删除；顶部显示本应用的 token 用量。
-- 右栏：「预览」「代码」两个 Tab。代码 Tab 是文件树 + Monaco，可以直接手改并保存。
+- 右栏：「预览」「代码」两个 Tab。代码 Tab 是文件树 + Monaco，可以直接手改并保存。Monaco 体积大，切到代码 Tab 时才动态加载分包；文件列表和文件内容加载期间显示骨架屏，避免空白。
 - 推荐指令：新会话的空白页展示模板化的快捷需求按钮，例如「做一个报名表单」「加一个排行榜」。
 - 渲染：SSE 客户端复用「主站前端仓库」的 `src/utils/fetch-event-source.ts`；工具明细渲染参考 `src/components/openClaw/AssistantMessage/*`，改成折叠的摘要样式。
 - 同一应用可以有多个会话，但 Agent 任务按应用串行执行。手工编辑和 AI 改动共用草稿，按文件做乐观并发（`baseRev`）。
@@ -229,7 +229,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 - **后台视图**：应用里的 `admin.json` 描述运营要看什么（数字卡片、柱状/饼图/折线、可筛选可搜索可编辑的表格、说明），后台按配置渲染；AI 对话、后台「AI 生成」、手写 JSON 三种方式都能产出，规范见 `agent-docs/admin-view.md`。
 - **开放接口**：内网系统用 Bearer token 调 `/open-api/v1/*`，读数据、统计、导出；token 在后台「开放接口」页管理，按应用和 scope 授权，调用留审计。
 - 页面：应用列表与创建、Vibe IDE（§9）、能力申请与审批、数据台、发布、监控、成员、审计、平台设置（模型、模板、业务接口目录）。
-- 技术：Vue3 + Element Plus + Monaco + monaco diff。后台接口不开放 CORS，cookie 用 `__Host-` 前缀 + `SameSite=Strict`，请求必须带自定义头。
+- 技术：Vue3 + Element Plus + Monaco + monaco diff。后台接口不开放 CORS；会话不用 cookie，token 只存内存，请求带 `Authorization: Bearer`，非 GET 校验 `Origin`（见 [security-boundary.md](security-boundary.md)）。
 
 ## 12. 本地开发环境
 本地不依赖 Docker，全部在宿主机跑：

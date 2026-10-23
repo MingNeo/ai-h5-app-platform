@@ -1,9 +1,16 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { defineAsyncComponent, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import ChatPanel from '../../components/chat/ChatPanel.vue'
-import CodePanel from '../../components/code/CodePanel.vue'
+import EditorSkeleton from '../../components/editor/EditorSkeleton.vue'
 import PreviewPanel from '../../components/preview/PreviewPanel.vue'
+
+/** 代码面板（含 Monaco）按需加载，加载期间先显示骨架屏 */
+const CodePanel = defineAsyncComponent({
+  loader: () => import('../../components/code/CodePanel.vue'),
+  loadingComponent: EditorSkeleton,
+  delay: 120,
+})
 
 const route = useRoute()
 const appId = route.params.appId as string

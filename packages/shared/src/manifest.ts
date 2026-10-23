@@ -1,12 +1,14 @@
 import { z } from 'zod'
 
-export const ACL_PRESETS = ['private', 'public_read', 'submit_only', 'readonly', 'admin_only'] as const
+export const ACL_PRESETS = ['private', 'public_read', 'submit_only', 'public_submit', 'public_write', 'readonly', 'admin_only'] as const
 export type AclPreset = typeof ACL_PRESETS[number]
 
 export const ACL_DESCRIPTIONS: Record<AclPreset, string> = {
   private: '仅本人可读写',
   public_read: '所有人可读（含游客），本人可增删改',
   submit_only: '本人可提交、可读自己的，不能修改',
+  public_submit: '游客可提交、可读自己的，不能修改',
+  public_write: '所有人可读；游客可提交、可改删自己的',
   readonly: '所有人可读，仅后台可写',
   admin_only: '应用端不可访问，仅后台可见',
 }
@@ -16,8 +18,10 @@ export const ACL_OPENNESS: Record<AclPreset, number> = {
   admin_only: 0,
   private: 1,
   submit_only: 1,
+  public_submit: 2,
   readonly: 2,
   public_read: 3,
+  public_write: 4,
 }
 
 /** 可申请的平台能力注册表（平台内建，不走 HTTP；业务接口走 bizApis） */
@@ -170,6 +174,8 @@ export interface AclRules {
   guestRead: boolean
   /** 读取范围：all=所有人数据，own=仅自己，none=不可读 */
   read: 'all' | 'own' | 'none'
+  /** 未登录能否新增 */
+  guestCreate: boolean
   create: boolean
   update: boolean
   remove: boolean
@@ -178,15 +184,19 @@ export interface AclRules {
 export function aclRules(acl: AclPreset): AclRules {
   switch (acl) {
     case 'private':
-      return { guestRead: false, read: 'own', create: true, update: true, remove: true }
+      return { guestRead: false, read: 'own', guestCreate: false, create: true, update: true, remove: true }
     case 'public_read':
-      return { guestRead: true, read: 'all', create: true, update: true, remove: true }
+      return { guestRead: true, read: 'all', guestCreate: false, create: true, update: true, remove: true }
     case 'submit_only':
-      return { guestRead: false, read: 'own', create: true, update: false, remove: false }
+      return { guestRead: false, read: 'own', guestCreate: false, create: true, update: false, remove: false }
+    case 'public_submit':
+      return { guestRead: false, read: 'own', guestCreate: true, create: true, update: false, remove: false }
+    case 'public_write':
+      return { guestRead: true, read: 'all', guestCreate: true, create: true, update: true, remove: true }
     case 'readonly':
-      return { guestRead: true, read: 'all', create: false, update: false, remove: false }
+      return { guestRead: true, read: 'all', guestCreate: false, create: false, update: false, remove: false }
     case 'admin_only':
-      return { guestRead: false, read: 'none', create: false, update: false, remove: false }
+      return { guestRead: false, read: 'none', guestCreate: false, create: false, update: false, remove: false }
   }
 }
 

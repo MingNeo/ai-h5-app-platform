@@ -1,9 +1,9 @@
-import { appUrl, validateAppId } from '@app-platform/shared'
+import { appUrl, MANIFEST_FILE, validateAppId } from '@app-platform/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { config } from '../../config'
 import { draftManifest, invalidateApp } from '../../core/apps'
-import { initDraft } from '../../core/drafts'
+import { initDraft, readDraftText, writeDraft } from '../../core/drafts'
 import { audit } from '../../lib/audit'
 import { err } from '../../lib/errors'
 import { ok, parseBody } from '../../lib/http'
@@ -124,6 +124,31 @@ export function registerAppRoutes(app: FastifyInstance) {
     return ok(view(doc!, await appRole(user, appId)))
   })
 
+  // 登录要求由 manifest.json 的 requireLogin 控制，这里做便捷开关（改草稿文件，随发布生效）
+  app.put('/admin-api/apps/:appId/require-login', async (req) => {
+    const { appId } = req.params as { appId: string }
+    const { user } = await requireAppRole(req, appId, 'developer')
+    const { requireLogin } = parseBody(z.object({ requireLogin: z.boolean() }), req.body)
+    const text = await readDraftText(appId, MANIFEST_FILE)
+    if (text === null)
+      throw err.notFound('缺少 manifest.json')
+    let manifest: Record<string, unknown>
+    try {
+      manifest = JSON.parse(text)
+    }
+    catch {
+      throw err.invalid('manifest.json 不是合法的 JSON，请先在代码里修正')
+    }
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest))
+      throw err.invalid('manifest.json 内容需要是对象')
+    if (manifest.requireLogin === requireLogin)
+      return ok({ requireLogin })
+    manifest.requireLogin = requireLogin
+    await writeDraft(appId, MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`, { userId: user._id })
+    audit(user._id, 'app.requireLogin', appId, { requireLogin })
+    return ok({ requireLogin })
+  })
+
   app.delete('/admin-api/apps/:appId', async (req) => {
     const { appId } = req.params as { appId: string }
     const { user } = await requireAppRole(req, appId, 'owner')
@@ -132,8 +157,6 @@ export function registerAppRoutes(app: FastifyInstance) {
     audit(user._id, 'app.delete', appId)
     return ok({})
   })
-
-  // ---------- 成员 ----------
   app.get('/admin-api/apps/:appId/members', async (req) => {
     const { appId } = req.params as { appId: string }
     await requireAppRole(req, appId, 'viewer')
