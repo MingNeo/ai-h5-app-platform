@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { FORBIDDEN_FILE_RE, LOCKED_FILES, TEMPLATE_FILES_DIR } from '@app-platform/app-template'
-import type { FileChange } from '@app-platform/shared'
+import { ADMIN_VIEW_FILE, type FileChange } from '@app-platform/shared'
 import { diffLines } from 'diff'
 import { blobs } from '../lib/blob'
 import { AppError, err } from '../lib/errors'
@@ -30,8 +30,8 @@ export function validatePath(path: string, opts: { allowLocked?: boolean } = {})
     throw err.invalid(`${path} 由平台统一管理，不能在应用中创建`)
   if (!opts.allowLocked && LOCKED_FILES.includes(path))
     throw err.invalid(`${path} 是平台锁定文件，不能修改`)
-  if (!(path === 'index.html' || path === 'manifest.json' || path.startsWith('src/') || path.startsWith('public/')))
-    throw err.invalid('文件只能放在 src/、public/ 目录下，或者是根目录的 index.html、manifest.json')
+  if (!(path === 'index.html' || path === 'manifest.json' || path === ADMIN_VIEW_FILE || path.startsWith('src/') || path.startsWith('public/')))
+    throw err.invalid(`文件只能放在 src/、public/ 目录下，或者是根目录的 index.html、manifest.json、${ADMIN_VIEW_FILE}`)
 }
 
 function notify(appId: string, changes: DraftChange[]) {

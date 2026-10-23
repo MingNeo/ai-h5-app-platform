@@ -53,7 +53,8 @@ export function registerDataRoutes(app: FastifyInstance) {
     const { appId, env, col } = req.params as { appId: string, env: string, col: string }
     await requireAppRole(req, appId, 'viewer')
     const e = envSchema.parse(env)
-    await defOf(appId, e, col)
+    const collectionDef = await defOf(appId, e, col)
+    const body = (req.body ?? {}) as { search?: { value?: unknown, fields?: unknown } }
     let q
     try {
       q = normalizeQuery(req.body)
@@ -61,10 +62,24 @@ export function registerDataRoutes(app: FastifyInstance) {
     catch (ex) {
       throw err.invalid((ex as Error).message)
     }
+    let where = q.where as Document
+    // 关键字搜索：只对声明过的字符串字段做包含匹配（管理端专用，不进应用 DSL）
+    const keyword = typeof body.search?.value === 'string' ? body.search.value.trim() : ''
+    const fields = Array.isArray(body.search?.fields) ? body.search!.fields.filter((f): f is string => typeof f === 'string') : []
+    if (keyword && fields.length) {
+      for (const f of fields) {
+        const fieldDef = collectionDef.fields[f]
+        if (!fieldDef || (typeof fieldDef === 'string' ? fieldDef !== 'string' : fieldDef.type !== 'string'))
+          throw err.invalid(`搜索字段 ${f} 必须是已声明的字符串字段`)
+      }
+      const esc = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').slice(0, 100)
+      const or = fields.map(f => ({ [f]: { $regex: esc, $options: 'i' } }))
+      where = { ...where, $or: or }
+    }
     const c = appCollection(appId, e, col)
     const [list, total] = await Promise.all([
-      c.find(q.where as Filter<Document>).sort(q.orderBy.length ? Object.fromEntries(q.orderBy.map(([f, d]) => [f, d === 'asc' ? 1 : -1])) : { _createdAt: -1 }).skip(q.skip).limit(q.limit).toArray(),
-      c.countDocuments(q.where as Filter<Document>, { maxTimeMS: 3000 }),
+      c.find(where as Filter<Document>).sort(q.orderBy.length ? Object.fromEntries(q.orderBy.map(([f, d]) => [f, d === 'asc' ? 1 : -1])) : { _createdAt: -1 }).skip(q.skip).limit(q.limit).toArray(),
+      c.countDocuments(where as Filter<Document>, { maxTimeMS: 3000 }),
     ])
     return ok({ list, total })
   })
@@ -81,7 +96,14 @@ export function registerDataRoutes(app: FastifyInstance) {
     await ensureIndexes(appId, e, col, def)
     const now = Date.now()
     const doc = { ...data, _id: newId(), _owner: `admin:${user._id}`, _ownerProfile: { nickname: user.name, avatar: user.avatar }, _createdAt: now, _updatedAt: now }
-    await appCollection<any>(appId, e, col).insertOne(doc)
+    try {
+      await appCollection<any>(appId, e, col).insertOne(doc)
+    }
+    catch (ex) {
+      if ((ex as { code?: number }).code === 11000)
+        throw err.duplicate('违反唯一约束，这条数据已经存在')
+      throw ex
+    }
     audit(user._id, 'data.create', appId, { env: e, col, id: doc._id })
     return ok(doc)
   })
@@ -114,6 +136,73 @@ export function registerDataRoutes(app: FastifyInstance) {
     await appCollection<any>(appId, e, col).deleteOne({ _id: id })
     audit(user._id, 'data.delete', appId, { env: e, col, id })
     return ok({})
+  })
+
+  app.post('/admin-api/apps/:appId/data/:env/:col/group', async (req) => {
+    const { appId, env, col } = req.params as { appId: string, env: string, col: string }
+    await requireAppRole(req, appId, 'viewer')
+    const e = envSchema.parse(env)
+    const def = await defOf(appId, e, col)
+    const input = (req.body ?? {}) as { field?: unknown, where?: unknown, limit?: unknown }
+    const field = typeof input.field === 'string' ? input.field : ''
+    if (!def.fields[field])
+      throw err.invalid('分组字段必须在 fields 中声明')
+    let q
+    try {
+      q = normalizeQuery({ where: input.where, limit: 1 })
+    }
+    catch (ex) {
+      throw err.invalid((ex as Error).message)
+    }
+    const limit = Math.min(Number(input.limit) || 20, 100)
+    const groups = await appCollection(appId, e, col).aggregate([
+      ...(Object.keys(q.where).length ? [{ $match: q.where as Document }] : []),
+      { $group: { _id: `$${field}`, count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: limit },
+    ], { maxTimeMS: 3000 }).toArray()
+    const total = groups.reduce((n, g) => n + Number(g.count), 0)
+    return ok({ field, total, groups: groups.map(g => ({ value: g._id ?? null, count: g.count })) })
+  })
+
+  /** 计数 / 求和 / 平均；带 timeField 时按天或小时出序列，供折线图 */
+  app.post('/admin-api/apps/:appId/data/:env/:col/stats', async (req) => {
+    const { appId, env, col } = req.params as { appId: string, env: string, col: string }
+    await requireAppRole(req, appId, 'viewer')
+    const e = envSchema.parse(env)
+    const def = await defOf(appId, e, col)
+    const input = (req.body ?? {}) as { op?: unknown, field?: unknown, where?: unknown, timeField?: unknown, interval?: unknown }
+    const op = ['count', 'sum', 'avg'].includes(String(input.op)) ? String(input.op) as 'count' | 'sum' | 'avg' : 'count'
+    const field = typeof input.field === 'string' ? input.field : ''
+    if (op !== 'count' && !def.fields[field])
+      throw err.invalid(`${op} 需要指定已声明的数值字段`)
+    let q
+    try {
+      q = normalizeQuery({ where: input.where, limit: 1 })
+    }
+    catch (ex) {
+      throw err.invalid((ex as Error).message)
+    }
+    const stages: Document[] = Object.keys(q.where).length ? [{ $match: q.where as Document }] : []
+    const timeField = typeof input.timeField === 'string' ? input.timeField : ''
+    if (timeField && !['_createdAt', '_updatedAt'].includes(timeField) && !def.fields[timeField])
+      throw err.invalid(`时间字段 ${timeField} 未声明`)
+    if (timeField) {
+      const unit = input.interval === 'hour' ? 'hour' : 'day'
+      const format = unit === 'hour' ? '%Y-%m-%dT%H:00:00Z' : '%Y-%m-%d'
+      const value = op === 'count' ? { $sum: 1 } : { [`$${op}`]: `$${field}` }
+      const rows = await appCollection(appId, e, col).aggregate([
+        ...stages,
+        { $group: { _id: { $dateToString: { format, date: { $toDate: `$${timeField}` }, timezone: 'Asia/Shanghai' } }, value } },
+        { $sort: { _id: 1 } },
+        { $limit: 400 },
+      ], { maxTimeMS: 5000 }).toArray()
+      return ok({ series: rows.map(r => ({ bucket: r._id, value: Number(r.value) || 0 })) })
+    }
+    const valueExpr = op === 'count' ? { $sum: 1 } : { [`$${op}`]: `$${field}` }
+    const rows = await appCollection(appId, e, col).aggregate([...stages, { $group: { _id: null, value: valueExpr } }], { maxTimeMS: 3000 }).toArray()
+    const raw = rows[0]?.value
+    return ok({ value: op === 'avg' ? Number((Number(raw) || 0).toFixed(2)) : Number(raw) || 0 })
   })
 
   app.get('/admin-api/apps/:appId/data/:env/:col/export', async (req, reply) => {

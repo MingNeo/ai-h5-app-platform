@@ -50,6 +50,18 @@ public/             按根路径访问的静态文件（/logo.png → public/log
 - 可以引用 `/__platform/...` 下的平台文件；其他绝对路径指向应用自己的 `public/`。
 - 不要创建 `package.json`、`vite.config.*`、`postcss.config.*`、`uno.config.*`、`tailwind.config.*`、`.env` 等工具链配置文件，平台会拒绝。
 
+## 应用后台视图（admin.json，可选但重要）
+
+有数据集合、面向运营的应用（报名、投票、留言、订单、审核），要在根目录写 `admin.json`：平台后台按它渲染运营视图，**只描述展示和操作，不写代码、不写查询语句**。
+
+- 具体字段、区块类型、完整示例见 `read_docs('admin-view')`，生成前必须先读
+- 结构：`{ title, description?, pages: [{ title, blocks: [...] }] }`
+- 四种区块：`stat`（数字卡片）、`chart`（bar / pie / line）、`table`（筛选 + 搜索 + 分页 + 详情/编辑/删除/新增）、`text`（说明）
+- 引用的集合必须在 manifest 声明，字段必须在集合的 `fields` 里，否则写入会被拒绝
+- 设计上：概览页 3–5 个 stat + 1–2 个 chart；管理页一个集合一张表，不超过 6 列；状态类字段配 `filters`
+- 改 manifest（新增集合、改字段）时要同步更新 `admin.json`
+- 用户也可以在后台「后台视图」页里让 AI 直接生成，不需要每次都经过对话
+
 ## 硬性约束（违反会被安全扫描拦截或运行时被 CSP 挡住）
 
 1. **只能访问自身文件和平台 SDK**：数据读写、登录、上传全部走全局对象 `platform`。CSP 只放行应用自身和平台接口：不能 fetch 外部地址，不能加载外部脚本 / 样式 / 字体 / 图片 / 音视频，所有 CDN 都不可用。

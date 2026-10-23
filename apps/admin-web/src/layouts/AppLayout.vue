@@ -12,6 +12,7 @@ const tabs = [
   { path: 'develop', label: '开发' },
   { path: 'release', label: '发布' },
   { path: 'data', label: '数据' },
+  { path: 'console', label: '后台视图' },
   { path: 'grants', label: '能力' },
   { path: 'monitor', label: '监控' },
   { path: 'members', label: '成员' },
