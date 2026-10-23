@@ -1,6 +1,6 @@
-# 平台 SDK（全局对象 `platform`，无需 import）
+# 平台 SDK（全局对象 `platform`，由 /__platform/boot.js 注入，无需 import）
 
-```ts
+```js
 // 初始化（含自动登录检查）。需要立刻知道登录状态的地方先 await
 await platform.ready()
 
@@ -12,7 +12,7 @@ const off = platform.auth.onChange(user => { /* 登录状态变化 */ })
 await platform.auth.logout()
 
 // ---------- 数据库（集合需先在 manifest.json 声明） ----------
-const votes = platform.db.collection<{ option: string }>('votes')
+const votes = platform.db.collection('votes')
 const doc = await votes.add({ option: 'a' })          // 需要登录；返回带系统字段的文档
 const { list, hasMore } = await votes
   .where({ option: 'a', score: { $gte: 60 } })         // 操作符：$eq $ne $gt $gte $lt $lte $in $nin $exists，支持 $and/$or
@@ -42,7 +42,7 @@ const { url } = await platform.files.upload(file, { public: true })  // 需要�
 // 返回的是上游的完整响应体。主站统一信封是 { error_code, error_msg, data }：
 // error_code 非 0 或未登录时 SDK 会抛 PlatformError（需要登录会自动拉起登录并重试），
 // 所以拿到返回值时一定是成功响应，按文档里的结构取字段即可。
-// 已登记的接口会按路径推断返回类型（src/biz-api.d.ts 由平台生成）；参数与返回以 read_biz_api 读到的文档为准。
+// 参数与返回以 read_biz_api 读到的文档为准。
 const res = await platform.biz.request('/api/v1/home/questions', { method: 'POST' })
 const questions = res.data.questions
 const created = await platform.biz.request('/api/coupon', { method: 'POST', data: { title: 'x' } })  // 其余方法：data 作为 JSON body
@@ -60,16 +60,16 @@ platform.isPlatformError(e)                      // 判断是否平台错误
 `VALIDATION_FAILED`（数据不符合 schema，`e.message` 有原因）、`RATE_LIMITED`、`QUOTA_EXCEEDED`（如超过每人条数上限）、
 `CAPABILITY_NOT_GRANTED`、`UPSTREAM_ERROR`、`NETWORK_ERROR`。
 
-```ts
-import { showToast } from 'vant'
+```js
+import { toast } from '/__platform/ui.js'
 try {
   await votes.add({ option })
 }
 catch (e) {
   if (platform.isPlatformError(e)) {
     if (e.code === 'LOGIN_CANCELLED') return
-    if (e.code === 'DUPLICATE') return showToast('你已经投过票了')
-    return showToast(e.message)
+    if (e.code === 'DUPLICATE') return toast('你已经投过票了')
+    return toast(e.message)
   }
   throw e
 }

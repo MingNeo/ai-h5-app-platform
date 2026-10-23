@@ -1,0 +1,165 @@
+/* 平台基础样式：设计令牌、重置、页面容器、轻提示、原生 dialog。
+   原子类由 /__platform/tailwind.js 在浏览器里生成；组件外观由应用自己用 Tailwind 组合。
+   全部放进 @layer，避免覆盖应用自己的样式和 Tailwind 工具类。 */
+
+@layer base {
+  :root {
+    --ui-bg: #f7f8fa;
+    --ui-surface: #fff;
+    --ui-text: #1f2329;
+    --ui-text-2: #646a73;
+    --ui-text-3: #8f959e;
+    --ui-border: #ebedf0;
+    --ui-primary: #1989fa;
+    --ui-danger: #ee0a24;
+    --ui-radius: 12px;
+    --ui-gap: 12px;
+    --ui-safe-top: env(safe-area-inset-top, 0px);
+    --ui-safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+  }
+
+  body {
+    min-height: 100vh;
+    background: var(--ui-bg);
+    color: var(--ui-text);
+    font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+    font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* 弹层打开时锁背景滚动（ui.js 自动加/移除） */
+  body.ui-no-scroll {
+    overflow: hidden;
+  }
+
+  a {
+    color: inherit;
+  }
+}
+
+@layer components {
+  .ui-page {
+    min-height: 100vh;
+    padding: calc(16px + var(--ui-safe-top)) 16px calc(16px + var(--ui-safe-bottom));
+  }
+
+  .ui-stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--ui-gap);
+  }
+
+  .ui-muted {
+    color: var(--ui-text-2);
+  }
+
+  .ui-hint {
+    color: var(--ui-text-3);
+    font-size: 13px;
+  }
+
+  .ui-empty {
+    padding: 48px 16px;
+    text-align: center;
+    color: var(--ui-text-3);
+  }
+
+  /* ---------- 轻提示 ---------- */
+
+  .ui-toast-wrap {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 50%;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .ui-toast {
+    max-width: 70vw;
+    padding: 10px 16px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.8);
+    color: #fff;
+    font-size: 14px;
+    text-align: center;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+
+  .ui-toast.ui-open {
+    opacity: 1;
+  }
+
+  /* ---------- 原生 dialog（ui.js 的 dialog() 用这套） ---------- */
+
+  .ui-dialog {
+    width: calc(100% - 48px);
+    max-width: 320px;
+    padding: 0;
+    border: 0;
+    border-radius: 14px;
+    background: var(--ui-surface);
+    color: var(--ui-text);
+  }
+
+  .ui-dialog::backdrop {
+    background: rgba(0, 0, 0, 0.45);
+  }
+
+  .ui-dialog-title {
+    padding: 20px 20px 8px;
+    font-size: 17px;
+    font-weight: 600;
+    text-align: center;
+  }
+
+  .ui-dialog-body {
+    max-height: 50vh;
+    overflow: auto;
+    padding: 0 20px 20px;
+    color: var(--ui-text-2);
+    text-align: center;
+    white-space: pre-wrap;
+  }
+
+  .ui-dialog-actions {
+    display: flex;
+    border-top: 1px solid var(--ui-border);
+  }
+
+  .ui-dialog-btn {
+    flex: 1;
+    height: 48px;
+    border: 0;
+    background: transparent;
+    font-size: 16px;
+    cursor: pointer;
+  }
+
+  .ui-dialog-btn + .ui-dialog-btn {
+    border-left: 1px solid var(--ui-border);
+  }
+
+  .ui-dialog-btn-primary {
+    color: var(--ui-primary);
+    font-weight: 600;
+  }
+
+  .ui-dialog-btn-danger {
+    color: var(--ui-danger);
+  }
+}
