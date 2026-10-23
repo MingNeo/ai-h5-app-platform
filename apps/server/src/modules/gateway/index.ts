@@ -15,6 +15,7 @@ import { UPLOAD_MIME } from '../../lib/mime'
 import { appCollection, col } from '../../lib/mongo'
 import { rateLimit } from '../../lib/store'
 import { newId, randomToken } from '../../lib/tokens'
+import { registerPlatformAssets } from '../host/platform-assets'
 import { countDocs, createDoc, type DataCtx, getDoc, groupDocs, queryDocs, removeDoc, updateDoc } from './data'
 import { encodeMock, type Identity, MOCK_COOKIE, resolveIdentity } from './identity'
 
@@ -35,8 +36,16 @@ declare module 'fastify' {
   }
 }
 
-/** 不需要 X-App-SDK 头的路径（sendBeacon、<img>、页面跳转、脚本） */
-const NO_SDK_HEADER = new Set(['/__platform/boot.js', '/__platform/preview-auth', '/__platform/api/telemetry'])
+/** 不需要 X-App-SDK 头的路径（sendBeacon、<img>、页面跳转、脚本、样式） */
+const NO_SDK_HEADER = new Set([
+  '/__platform/boot.js',
+  '/__platform/preview-auth',
+  '/__platform/api/telemetry',
+  '/__platform/dom.js',
+  '/__platform/ui.js',
+  '/__platform/ui.css',
+  '/__platform/tailwind.js',
+])
 
 /** 不转发给上游的平台 cookie（后台会话、预览票据、预览身份） */
 const PLATFORM_COOKIES = new Set(['__Host-app_admin', PREVIEW_COOKIE, MOCK_COOKIE])
@@ -377,4 +386,7 @@ export function registerGateway(app: FastifyInstance) {
       await pushDevError(appId, { kind: String(e.kind ?? 'js'), message: String(e.message ?? ''), stack: e.stack ? String(e.stack).slice(0, 4000) : undefined, file: e.file, line: e.line })
     return ok({})
   })
+
+  // 平台前端运行时（dom.js / ui.js / ui.css / tailwind.js）
+  registerPlatformAssets(app)
 }

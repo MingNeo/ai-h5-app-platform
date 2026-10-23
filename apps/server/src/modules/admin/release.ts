@@ -8,7 +8,6 @@ import { err } from '../../lib/errors'
 import { ok, parseBody } from '../../lib/http'
 import { col } from '../../lib/mongo'
 import { compareManifest, release, requestBuild } from '../build/service'
-import { previewStatus, stopPreview } from '../preview/manager'
 import { requireAppRole } from './auth'
 
 export function registerReleaseRoutes(app: FastifyInstance) {
@@ -28,19 +27,6 @@ export function registerReleaseRoutes(app: FastifyInstance) {
       return ok({ url: `https://${host}${body.path}` })
     const t = issuePreviewTicket(appId, user._id, body.identity, body.qr ? 30 * 60 : 10 * 60)
     return ok({ url: `https://${host}/__platform/preview-auth?t=${encodeURIComponent(t)}&next=${encodeURIComponent(body.path)}` })
-  })
-
-  app.get('/admin-api/apps/:appId/preview/status', async (req) => {
-    const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
-    return ok(previewStatus(appId))
-  })
-
-  app.post('/admin-api/apps/:appId/preview/restart', async (req) => {
-    const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'developer')
-    await stopPreview(appId)
-    return ok({})
   })
 
   app.get('/admin-api/apps/:appId/dev-errors', async (req) => {

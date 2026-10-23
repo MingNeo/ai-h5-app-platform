@@ -34,7 +34,7 @@
 - `orientation`: `portrait` | `landscape` | `auto`。
 - `capabilities`: 平台能力 key 列表，当前注册表为空；声明后还需在后台「能力」页申请并通过审批。
 - `bizApis`: 业务接口路径前缀，例如 `"/api/coupon/"`，需在后台申请。
-- `dependencies`: 额外使用的白名单依赖，可选 `lodash-es`、`canvas-confetti`、`phaser`、`howler`、`qrcode`、`echarts`，通过 `add_dependency` 工具添加。基础依赖（`vue`、`vue-router`、`vant`、`pinia`、`@vueuse/core`、`dayjs`）直接 import，不用声明。
+- `dependencies`: 保留字段，当前没有可用依赖（应用是纯 HTML + 原生 JS，没有 npm 包），保持为空数组。
 
 ## collections
 集合名：小写字母开头，只能包含字母、数字、下划线。

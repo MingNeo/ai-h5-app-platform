@@ -17,9 +17,8 @@ import { registerMonitorRoutes } from './modules/admin/monitor'
 import { registerReleaseRoutes } from './modules/admin/release'
 import { registerAgentRoutes } from './modules/agent/routes'
 import { registerGateway } from './modules/gateway'
-import { appPageHeaders, serveAppBuild } from './modules/host/app-host'
+import { serveAppBuild, serveAppDraft } from './modules/host/app-host'
 import { placeholderPage } from './modules/host/pages'
-import { proxyPreviewRequest, proxyPreviewUpgrade } from './modules/preview/manager'
 
 const ADMIN_DIST = join(config.repoRoot, 'apps/admin-web/dist')
 
@@ -55,7 +54,7 @@ export async function buildApp() {
   registerMonitorRoutes(app)
   registerGateway(app)
 
-  // 后台静态资源、实时预览（代理到 Vite dev server）、线上版 / 测试版
+  // 后台静态资源、实时预览（直接返回草稿文件）、线上版 / 测试版
   app.route({
     method: ['GET', 'HEAD'],
     url: '/*',
@@ -68,26 +67,10 @@ export async function buildApp() {
       if (site.channel === 'dev') {
         if (!readPreviewClaims(req.headers.cookie, site.appId))
           return reply.status(403).type('text/html; charset=utf-8').send(placeholderPage('preview_forbidden'))
-        const headers = await appPageHeaders(site.appId, 'dev', req.headers.host ?? '')
-        reply.hijack()
-        await proxyPreviewRequest(site.appId, req.raw, reply.raw, (_status, ct) => ({
-          ...headers,
-          'Content-Security-Policy': ct?.includes('text/html') ? headers['Content-Security-Policy']! : '',
-          'cache-control': 'no-store',
-        }))
-        return
+        return serveAppDraft(req, reply)
       }
       return serveAppBuild(req, reply)
     },
-  })
-
-  app.server.on('upgrade', (req, socket, head) => {
-    const site = parseSiteHost(req.headers.host, config.baseDomain)
-    if (site?.kind !== 'app' || site.channel !== 'dev' || !req.url?.startsWith('/__vite_hmr') || !readPreviewClaims(req.headers.cookie, site.appId)) {
-      socket.destroy()
-      return
-    }
-    void proxyPreviewUpgrade(site.appId, req, socket, head)
   })
 
   return app

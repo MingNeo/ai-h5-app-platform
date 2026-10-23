@@ -1,22 +1,17 @@
-import { join } from 'node:path'
 import { DOC_TOPICS, type DocTopic, loadDoc } from '@app-platform/agent-docs'
-import { LOCKED_FILES, OPTIONAL_DEPENDENCIES } from '@app-platform/app-template'
 import { type CheckIssue, fieldsToJsonSchema, MANIFEST_FILE, normalizeQuery, parseManifestText, renderBizApiDetail, renderBizApiIndex, type TodoItem } from '@app-platform/shared'
 import Ajv from 'ajv'
 import type { Document } from 'mongodb'
-import { config } from '../../config'
 import { draftManifest } from '../../core/apps'
-import { bizCheckInput, bizContext, bizEntriesOf, generatedFiles } from '../../core/biz-docs'
-import { checkWorkspace, formatIssues } from '../../core/checks'
+import { bizCheckInput, bizContext, bizEntriesOf } from '../../core/biz-docs'
+import { checkSources, formatIssues, textSources } from '../../core/checks'
 import { getDevErrors } from '../../core/dev-errors'
-import { deleteDraft, listDraft, moveDraft, readDraftText, writeDraft } from '../../core/drafts'
-import { lockedFiles } from '../../core/workspace'
+import { currentFiles, deleteDraft, listDraft, moveDraft, readDraftText, writeDraft } from '../../core/drafts'
 import { AppError } from '../../lib/errors'
 import type { ToolDef } from '../../lib/llm'
 import { TEXT_EXT } from '../../lib/mime'
 import { appCollection } from '../../lib/mongo'
 import { newId } from '../../lib/tokens'
-import { ensureWorkspace, flushWorkspace, workspaceDir } from '../preview/manager'
 import { ensureIndexes } from '../gateway/data'
 
 export interface ToolContext {
@@ -48,7 +43,7 @@ function def(name: string, description: string, properties: Record<string, unkno
 export const TOOL_DEFS: ToolDef[] = [
   def('list_files', '列出应用的全部文件（路径和大小）。', {}),
   def('read_file', '读取文件内容。大文件可以用 offset/limit 按行读取（行号从 1 开始）。', {
-    path: { type: 'string', description: '相对路径，例如 src/pages/Home.vue' },
+    path: { type: 'string', description: '相对路径，例如 src/pages/home.js' },
     offset: { type: 'integer', description: '起始行号' },
     limit: { type: 'integer', description: '读取行数' },
   }, ['path']),
@@ -64,10 +59,10 @@ export const TOOL_DEFS: ToolDef[] = [
   }, ['path', 'old_string', 'new_string']),
   def('delete_file', '删除文件。', { path: { type: 'string' } }, ['path']),
   def('move_file', '移动或重命名文件。', { from: { type: 'string' }, to: { type: 'string' } }, ['from', 'to']),
-  def('glob', '按通配符查找文件，例如 src/**/*.vue。', { pattern: { type: 'string' } }, ['pattern']),
+  def('glob', '按通配符查找文件，例如 src/**/*.js。', { pattern: { type: 'string' } }, ['pattern']),
   def('grep', '在文本文件中按正则搜索，返回匹配的行。', {
     pattern: { type: 'string', description: 'JavaScript 正则' },
-    glob: { type: 'string', description: '限定文件范围，例如 src/**/*.vue' },
+    glob: { type: 'string', description: '限定文件范围，例如 src/**/*.js' },
     ignore_case: { type: 'boolean' },
   }, ['pattern']),
   def('todo_write', '更新本次任务的步骤清单（会展示给用户）。每次传完整列表；同一时间只能有一个 in_progress。', {
@@ -81,10 +76,7 @@ export const TOOL_DEFS: ToolDef[] = [
       },
     },
   }, ['todos']),
-  def('add_dependency', `声明使用白名单依赖（可选：${OPTIONAL_DEPENDENCIES.join('、')}），声明后才能 import。`, {
-    name: { type: 'string', enum: OPTIONAL_DEPENDENCIES },
-  }, ['name']),
-  def('check', '校验应用：manifest 校验、安全扫描、类型检查、构建。改完代码后必须调用，有错误要修复。', {}),
+  def('check', '校验应用：manifest 校验、安全扫描、业务接口核对、JS 语法检查。改完代码后必须调用，有错误要修复。', {}),
   def('get_runtime_errors', '获取预览页面里最近的运行时错误、控制台报错、接口失败和编译错误。', {
     since_minutes: { type: 'integer', description: '只看最近多少分钟，默认 30' },
   }),
@@ -149,12 +141,11 @@ async function run(ctx: ToolContext, name: string, args: Args): Promise<ToolOutp
     case 'list_files': {
       const files = await listDraft(appId)
       const lines = files.map(f => `${f.path}  (${f.size}B)`)
-      lines.push(...LOCKED_FILES.map(p => `${p}  (平台锁定，只读)`))
       return { ok: true, output: lines.join('\n'), summary: `${files.length} 个文件` }
     }
     case 'read_file': {
       const path = String(args.path ?? '')
-      let text = LOCKED_FILES.includes(path) ? lockedFiles(await generatedFiles(appId))[path] ?? null : await readDraftText(appId, path)
+      let text = await readDraftText(appId, path)
       if (text === null)
         return { ok: false, output: `文件不存在：${path}`, summary: path }
       if (!TEXT_EXT.test(path))
@@ -201,7 +192,7 @@ async function run(ctx: ToolContext, name: string, args: Args): Promise<ToolOutp
     }
     case 'delete_file': {
       const path = String(args.path ?? '')
-      if (path === MANIFEST_FILE || path === 'index.html' || path === 'src/main.ts')
+      if (path === MANIFEST_FILE || path === 'index.html' || path === 'src/app.js')
         return { ok: false, output: `${path} 是必需文件，不能删除`, summary: path }
       await deleteDraft(appId, path, { userId })
       ctx.dirty = true
@@ -246,28 +237,9 @@ async function run(ctx: ToolContext, name: string, args: Args): Promise<ToolOutp
       ctx.onTodos(todos)
       return { ok: true, output: '已更新步骤清单', summary: `${todos.filter(t => t.status === 'completed').length}/${todos.length} 完成` }
     }
-    case 'add_dependency': {
-      const dep = String(args.name ?? '')
-      if (!OPTIONAL_DEPENDENCIES.includes(dep))
-        return { ok: false, output: `${dep} 不在白名单内，可选：${OPTIONAL_DEPENDENCIES.join('、')}`, summary: dep }
-      const text = await readDraftText(appId, MANIFEST_FILE) ?? '{}'
-      const m = JSON.parse(text)
-      m.dependencies = [...new Set([...(m.dependencies ?? []), dep])]
-      const next = `${JSON.stringify(m, null, 2)}\n`
-      await validateManifestWrite(next)
-      await writeDraft(appId, MANIFEST_FILE, next, { userId })
-      ctx.dirty = true
-      return { ok: true, output: `已声明依赖 ${dep}，现在可以 import 它了`, summary: dep }
-    }
     case 'check': {
       ctx.onCheck('running', [])
-      await ensureWorkspace(appId)
-      await flushWorkspace(appId)
-      const res = await checkWorkspace(workspaceDir(appId), {
-        outDir: join(config.dataDir, 'check-out', appId),
-        cacheDir: join(config.dataDir, 'vite-cache', `${appId}-check`),
-        biz: await bizCheckInput(appId),
-      })
+      const res = await checkSources(await textSources(await currentFiles(appId)), { biz: await bizCheckInput(appId) })
       ctx.dirty = false
       ctx.lastCheck = { ok: res.ok, issues: res.issues }
       ctx.onCheck(res.ok ? 'passed' : 'failed', res.issues)
