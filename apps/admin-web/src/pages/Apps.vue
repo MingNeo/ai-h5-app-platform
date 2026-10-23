@@ -24,7 +24,6 @@ const keyword = ref('')
 const showCreate = ref(false)
 const creating = ref(false)
 const form = reactive({ appId: '', name: '', description: '' })
-const baseDomain = ref('')
 
 const filtered = computed(() => apps.value.filter(a => !keyword.value || a.name.includes(keyword.value) || a.appId.includes(keyword.value)))
 const appIdError = computed(() => form.appId ? validateAppId(form.appId) : null)
@@ -66,7 +65,6 @@ function statusTag(a: AppItem) {
 }
 
 onMounted(async () => {
-  api<{ baseDomain: string }>('/meta').then(m => { baseDomain.value = m.baseDomain }).catch(() => {})
   await load()
 })
 </script>
@@ -121,8 +119,11 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="appId（用于访问地址，创建后不能修改）" required :error="appIdError ?? ''">
           <el-input v-model="form.appId" maxlength="30" placeholder="例如：spring-vote">
+            <template #prepend>
+              /a/
+            </template>
             <template #append>
-              .{{ baseDomain || 'example.com' }}
+              /
             </template>
           </el-input>
         </el-form-item>

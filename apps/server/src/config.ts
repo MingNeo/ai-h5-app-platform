@@ -41,7 +41,9 @@ function num(v: string | undefined, def: number) {
 
 const baseDomain = (env.APP_BASE_DOMAIN || '').trim().toLowerCase().replace(/\.$/, '')
 if (!baseDomain)
-  throw new Error('缺少环境变量 APP_BASE_DOMAIN（应用基础域名，例如 app.example.com）')
+  throw new Error('缺少环境变量 APP_BASE_DOMAIN（平台唯一入口域名，例如 apps.example.com）')
+if (baseDomain.split('.').length < 2)
+  throw new Error('APP_BASE_DOMAIN 需要是完整域名，例如 apps.example.com')
 
 export type NativeBridge = 'android-bridge' | 'call-native'
 
@@ -94,7 +96,10 @@ export const config = {
   port: num(env.PORT, 3000),
   host: env.HOST || '0.0.0.0',
   baseDomain,
-  adminOrigin: `https://admin.${baseDomain}`,
+  /** 本地免登时额外接受的 Host（直接访问 localhost:3000 调试用） */
+  devHosts: list(env.DEV_HOSTS || (bool(env.DEV_ADMIN_BYPASS) ? 'localhost,127.0.0.1' : '')).map(h => h.toLowerCase()),
+  /** 后台与应用同源：/admin、/admin-api */
+  adminOrigin: `https://${baseDomain}`,
   roles: new Set(list(env.ROLES || 'api,build')),
 
   mongoUrl: env.MONGO_URL || 'mongodb://127.0.0.1:27017/app_platform',

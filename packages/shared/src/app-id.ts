@@ -9,6 +9,9 @@ export const RESERVED_APP_IDS = new Set([
   'beta', 'dev', 'test', 'preview', 'platform', 'login', 'auth', 'mail', 'img', 'file', 'files',
 ])
 
+/** 应用页面的固定路径前缀：/a/{appId}[--dev|--beta]/ */
+export const APP_PATH_PREFIX = '/a'
+
 export function validateAppId(appId: string): string | null {
   if (!APP_ID_RE.test(appId))
     return 'appId 需为 3–30 位小写字母、数字或连字符，首尾不能是连字符，且不能包含连续的 --'
@@ -19,32 +22,58 @@ export function validateAppId(appId: string): string | null {
 
 export type SiteInfo =
   | { kind: 'admin' }
-  | { kind: 'app', appId: string, channel: Channel }
+  | { kind: 'app', appId: string, channel: Channel, /** 去掉前缀后的应用内路径，以 / 开头 */ path: string }
+
+/** 后台页面与后台接口都挂在同一个 origin 下 */
+export function isAdminPath(pathname: string): boolean {
+  return pathname === '/admin' || pathname.startsWith('/admin/') || pathname === '/admin-api' || pathname.startsWith('/admin-api/')
+}
 
 /**
- * 根据 Host 解析站点：admin.<base> 为后台，{appId}[--dev|--beta].<base> 为应用。
+ * 解析 /a/{appId}[--dev|--beta]/...。
+ * `--` 不允许出现在 appId 里，所以渠道后缀不会产生歧义。
  */
-export function parseSiteHost(host: string | undefined, baseDomain: string): SiteInfo | null {
+export function parseAppPath(pathname: string): { appId: string, channel: Channel, path: string } | null {
+  const m = /^\/a\/([^/]+?)(\/.*)?$/.exec(pathname)
+  if (!m)
+    return null
+  const label = m[1]!
+  const cm = /^(.+?)(?:--(dev|beta))?$/.exec(label)
+  if (!cm)
+    return null
+  const appId = cm[1]!
+  if (!APP_ID_RE.test(appId) || RESERVED_APP_IDS.has(appId))
+    return null
+  return { appId, channel: (cm[2] as Channel | undefined) ?? 'prod', path: m[2] || '/' }
+}
+
+/**
+ * 根据 Host + URL 解析站点。平台只有一个入口域名：
+ * - `/admin`、`/admin/...`、`/admin-api/...` → 后台
+ * - `/a/{appId}[--dev|--beta]/...`        → 应用
+ * - 其他路径不是站点（平台运行时文件、健康检查等由各自路由处理）
+ */
+export function parseSite(host: string | undefined, url: string, baseDomain: string, extraHosts: string[] = []): SiteInfo | null {
   if (!host)
     return null
   const hostname = host.split(':')[0]!.toLowerCase()
-  const suffix = `.${baseDomain.toLowerCase()}`
-  if (!hostname.endsWith(suffix))
+  if (hostname !== baseDomain.toLowerCase() && !extraHosts.includes(hostname))
     return null
-  const label = hostname.slice(0, -suffix.length)
-  if (label === 'admin')
+  const pathname = url.split('?')[0] || '/'
+  if (isAdminPath(pathname))
     return { kind: 'admin' }
-  const m = /^(.+?)(?:--(dev|beta))?$/.exec(label)
-  if (!m)
-    return null
-  const appId = m[1]!
-  if (!APP_ID_RE.test(appId) || RESERVED_APP_IDS.has(appId))
-    return null
-  return { kind: 'app', appId, channel: (m[2] as Channel | undefined) ?? 'prod' }
+  const app = parseAppPath(pathname)
+  return app ? { kind: 'app', ...app } : null
 }
 
-export function appHost(appId: string, channel: Channel, baseDomain: string): string {
-  return channel === 'prod' ? `${appId}.${baseDomain}` : `${appId}--${channel}.${baseDomain}`
+/** 应用根路径（不带结尾斜杠），例：/a/vote、/a/vote--dev */
+export function appPath(appId: string, channel: Channel): string {
+  return `${APP_PATH_PREFIX}/${appId}${channel === 'prod' ? '' : `--${channel}`}`
+}
+
+/** 应用根 URL，结尾带斜杠 */
+export function appUrl(appId: string, channel: Channel, baseDomain: string): string {
+  return `https://${baseDomain}${appPath(appId, channel)}/`
 }
 
 export function dataEnvOf(channel: Channel): DataEnv {

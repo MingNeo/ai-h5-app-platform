@@ -43,7 +43,7 @@ export interface ApiInit {
 export async function rawApi<T>(path: string, init: ApiInit = {}): Promise<T> {
   const method = init.method ?? (init.body === undefined && init.rawBody === undefined ? 'GET' : 'POST')
   const url = `${config.apiBase}${path}`
-  const headers: Record<string, string> = { 'X-App-SDK': '1' }
+  const headers: Record<string, string> = { 'X-App-SDK': '1', 'X-App-Id': config.appId, 'X-App-Channel': config.channel }
   let body: BodyInit | undefined = init.rawBody
   if (init.body !== undefined) {
     headers['Content-Type'] = 'application/json'

@@ -44,7 +44,7 @@ function send(reply: FastifyReply, req: FastifyRequest, entry: Cached, type: str
     .send(entry.data)
 }
 
-/** 注册在 gateway 的 onRequest 之后：这些路径同样要过应用校验和预览 cookie */
+/** 注册在 gateway 的 onRequest 之后；这些文件与应用无关，跨应用共享缓存 */
 export function registerPlatformAssets(app: FastifyInstance) {
   for (const [path, meta] of Object.entries(FILES)) {
     app.get(path, async (req, reply) => {

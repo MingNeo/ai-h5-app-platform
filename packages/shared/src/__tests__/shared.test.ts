@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseSiteHost, validateAppId } from '../app-id'
+import { appPath, appUrl, parseAppPath, parseSite, validateAppId } from '../app-id'
 import { assertSafeDocument, DslError, normalizeQuery } from '../dsl'
 import { aclRules, fieldsToJsonSchema, parseManifest } from '../manifest'
 import { type BizApiSpec, checkBizCalls, extractBizParams, findBizOperation, generateBizApiDts, isHttpUrl, matchBizPath, normalizeOpenApi, parseOpenApiText, renderBizApiDetail, renderBizApiIndex, responseType, rewriteBizPath, schemaToTs, specOperations } from '../openapi'
@@ -17,16 +17,28 @@ describe('appId 与域名解析', () => {
     expect(validateAppId('admin')).toMatch('保留')
   })
   it('解析渠道', () => {
-    expect(parseSiteHost(`vote.${BASE}`, BASE)).toEqual({ kind: 'app', appId: 'vote', channel: 'prod' })
-    expect(parseSiteHost(`vote--dev.${BASE}:443`, BASE)).toEqual({ kind: 'app', appId: 'vote', channel: 'dev' })
-    expect(parseSiteHost(`vote--beta.${BASE}`, BASE)).toEqual({ kind: 'app', appId: 'vote', channel: 'beta' })
-    expect(parseSiteHost(`admin.${BASE}`, BASE)).toEqual({ kind: 'admin' })
+    expect(parseAppPath('/a/vote/')).toEqual({ appId: 'vote', channel: 'prod', path: '/' })
+    expect(parseAppPath('/a/vote--dev/src/app.js?x=1')).toEqual({ appId: 'vote', channel: 'dev', path: '/src/app.js?x=1' })
+    expect(parseAppPath('/a/vote--beta/about.html')).toEqual({ appId: 'vote', channel: 'beta', path: '/about.html' })
   })
-  it('拒绝非平台域名与多级子域', () => {
-    expect(parseSiteHost('vote.evil.com', BASE)).toBeNull()
-    expect(parseSiteHost(`a.b.${BASE}`, BASE)).toBeNull()
-    expect(parseSiteHost(`vote--prod.${BASE}`, BASE)).toBeNull()
-    expect(parseSiteHost(`api.${BASE}`, BASE)).toBeNull()
+  it('解析站点', () => {
+    expect(parseSite(BASE, '/a/vote/', BASE)).toEqual({ kind: 'app', appId: 'vote', channel: 'prod', path: '/' })
+    expect(parseSite(`${BASE}:443`, '/admin/apps/vote', BASE)).toEqual({ kind: 'admin' })
+    expect(parseSite(BASE, '/admin-api/apps', BASE)).toEqual({ kind: 'admin' })
+    expect(parseSite(BASE, '/__platform/dom.js', BASE)).toBeNull()
+    expect(parseSite(BASE, '/a/', BASE)).toBeNull()
+  })
+  it('拒绝其他域名与非应用路径', () => {
+    expect(parseSite('vote.evil.com', '/a/vote/', BASE)).toBeNull()
+    expect(parseSite('admin.example.test', '/a/vote/', BASE)).toBeNull()
+    expect(parseSite(BASE, '/a/vote--prod/', BASE)).toBeNull()
+    expect(parseSite(BASE, '/a/api/', BASE)).toBeNull()
+    expect(parseSite(BASE, '/vote/', BASE)).toBeNull()
+  })
+  it('生成应用地址', () => {
+    expect(appPath('vote', 'prod')).toBe('/a/vote')
+    expect(appPath('vote', 'dev')).toBe('/a/vote--dev')
+    expect(appUrl('vote', 'beta', BASE)).toBe(`https://${BASE}/a/vote--beta/`)
   })
 })
 
