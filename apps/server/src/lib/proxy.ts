@@ -2,12 +2,16 @@ import http from 'node:http'
 import net from 'node:net'
 import type { Duplex } from 'node:stream'
 
-/** 把请求原样转发到本机端口（预览 dev server），可在返回前改写响应头 */
+/** 把请求原样转发到本机端口（预览 dev server），可在返回前改写响应头/文本 */
 export function proxyHttp(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   port: number,
-  opts: { setHeaders?: (headers: http.IncomingHttpHeaders, status: number) => Record<string, string> } = {},
+  opts: {
+    setHeaders?: (headers: http.IncomingHttpHeaders, status: number) => Record<string, string>
+    /** 只在 text/html 响应上生效；用于修掉 Vite 给平台路径补的 base 前缀 */
+    rewriteText?: (text: string) => string
+  } = {},
 ) {
   const upstream = http.request({
     host: '127.0.0.1',
@@ -23,7 +27,20 @@ export function proxyHttp(
         delete headers[k.toLowerCase()]
       else headers[k.toLowerCase()] = v
     }
-    res.writeHead(up.statusCode ?? 502, headers)
+    const status = up.statusCode ?? 502
+    if (opts.rewriteText && String(up.headers['content-type'] ?? '').includes('text/html')) {
+      const chunks: Buffer[] = []
+      up.on('data', c => chunks.push(c as Buffer))
+      up.on('end', () => {
+        const body = Buffer.from(opts.rewriteText!(Buffer.concat(chunks).toString('utf8')), 'utf8')
+        delete headers['transfer-encoding']
+        headers['content-length'] = String(body.length)
+        res.writeHead(status, headers)
+        res.end(body)
+      })
+      return
+    }
+    res.writeHead(status, headers)
     up.pipe(res)
   })
   upstream.on('error', (e) => {
