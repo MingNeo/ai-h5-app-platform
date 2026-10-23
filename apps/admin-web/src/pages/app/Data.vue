@@ -20,6 +20,11 @@ const page = ref(1)
 const pageSize = 20
 const loading = ref(false)
 const editDialog = ref<{ id?: string, json: string } | null>(null)
+const mode = ref<'table' | 'stats'>('table')
+const groupField = ref('')
+const groups = ref<Array<{ value: unknown, count: number }>>([])
+const groupTotal = ref(0)
+const loadingGroup = ref(false)
 const kvDialog = ref<{ key: string, json: string, isNew: boolean } | null>(null)
 
 const ACL_LABEL: Record<string, string> = { private: '仅本人', public_read: '公开读', submit_only: '仅提交', readonly: '只读配置', admin_only: '仅后台' }
@@ -34,6 +39,20 @@ async function loadCollections() {
     current.value = collections.value[0]?.name ?? null
   if (current.value)
     await loadRows()
+}
+
+async function loadGroup() {
+  if (!current.value || !groupField.value)
+    return
+  loadingGroup.value = true
+  try {
+    const res = await api<{ total: number, groups: Array<{ value: unknown, count: number }> }>(`/apps/${appId}/data/${env.value}/${current.value}/group`, { body: { field: groupField.value, limit: 50 } })
+    groups.value = res.groups
+    groupTotal.value = res.total
+  }
+  finally {
+    loadingGroup.value = false
+  }
 }
 
 async function loadRows() {
@@ -123,7 +142,22 @@ watch(env, () => {
 })
 watch(current, () => {
   page.value = 1
+  groupField.value = columns.value[0] ?? ''
+  groups.value = []
   void loadRows()
+  if (mode.value === 'stats')
+    void loadGroup()
+})
+watch(mode, (m) => {
+  if (m === 'stats') {
+    if (!groupField.value)
+      groupField.value = columns.value[0] ?? ''
+    void loadGroup()
+  }
+})
+watch(groupField, () => {
+  if (mode.value === 'stats')
+    void loadGroup()
 })
 onMounted(loadCollections)
 </script>
@@ -182,7 +216,15 @@ onMounted(loadCollections)
           </el-tag>
           <span class="text-13px text-[var(--muted)]">共 {{ total }} 条</span>
           <span class="flex-1" />
-          <el-button size="small" @click="loadRows">
+          <el-radio-group v-model="mode" size="small">
+            <el-radio-button value="table">
+              表格
+            </el-radio-button>
+            <el-radio-button value="stats">
+              统计
+            </el-radio-button>
+          </el-radio-group>
+          <el-button size="small" @click="mode === 'stats' ? loadGroup() : loadRows()">
             刷新
           </el-button>
           <el-button size="small" :disabled="!canWrite" @click="openEdit()">
@@ -195,7 +237,26 @@ onMounted(loadCollections)
             同步到正式环境
           </el-button>
         </div>
-        <el-table v-loading="loading" :data="rows" size="small" border class="flex-1" height="100%">
+        <div v-if="mode === 'stats'" v-loading="loadingGroup" class="flex-1 flex flex-col gap-3 min-h-0 overflow-auto">
+          <div class="flex items-center gap-2">
+            <span class="text-13px text-[var(--muted)]">按字段分组</span>
+            <el-select v-model="groupField" size="small" class="w-180px" placeholder="选择字段">
+              <el-option v-for="c in columns" :key="c" :label="c" :value="c" />
+            </el-select>
+            <span class="text-13px text-[var(--muted)]">共 {{ groupTotal }} 条</span>
+          </div>
+          <div v-if="!groups.length" class="text-13px text-[var(--muted)] py-6 text-center">
+            暂无数据
+          </div>
+          <div v-for="g in groups" :key="String(g.value)" class="flex items-center gap-3">
+            <span class="w-140px truncate text-13px">{{ g.value === null ? '（空）' : fmt(g.value) }}</span>
+            <div class="flex-1 h-20px rounded bg-gray-100 overflow-hidden">
+              <div class="h-full bg-blue-500" :style="{ width: (groupTotal ? Math.round((g.count / groupTotal) * 100) : 0) + '%' }" />
+            </div>
+            <span class="w-90px text-right text-13px">{{ g.count }}（{{ groupTotal ? Math.round((g.count / groupTotal) * 100) : 0 }}%）</span>
+          </div>
+        </div>
+        <el-table v-else v-loading="loading" :data="rows" size="small" border class="flex-1" height="100%">
           <el-table-column v-for="c in columns" :key="c" :label="c" min-width="120" show-overflow-tooltip>
             <template #default="{ row }">
               {{ fmt(row[c]) }}

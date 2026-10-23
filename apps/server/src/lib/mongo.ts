@@ -201,6 +201,22 @@ export interface AuditDoc {
   createdAt: Date
 }
 
+export interface ApiClientDoc {
+  _id: string
+  name: string
+  /** sha256(token)，明文只在创建时返回一次 */
+  tokenHash: string
+  /** 允许访问的应用；["*"] 表示全部 */
+  appIds: string[]
+  scopes: Array<'read' | 'write' | 'export' | 'dev'>
+  /** 可选 IP 白名单（精确匹配或 CIDR 前缀不支持的简化写法） */
+  allowedIps?: string[]
+  createdBy: string
+  createdAt: Date
+  lastUsedAt?: Date
+  revokedAt?: Date
+}
+
 export interface TelemetryDoc {
   appId: string
   channel: string
@@ -262,6 +278,7 @@ export const col = {
   get turns() { return db.collection<TurnDoc>('agent_turns') },
   get events() { return db.collection<EventDoc>('agent_events') },
   get audit() { return db.collection<AuditDoc>('audit_logs') },
+  get apiClients() { return db.collection<ApiClientDoc>('api_clients') },
   get telemetry() { return db.collection<TelemetryDoc>('telemetry_events') },
 }
 
@@ -292,6 +309,7 @@ async function ensureIndexes() {
     col.turns.createIndex({ appId: 1, status: 1, createdAt: 1 }),
     col.events.createIndex({ sessionId: 1, seq: 1 }, { unique: true }),
     col.audit.createIndex({ appId: 1, createdAt: -1 }),
+    col.apiClients.createIndex({ tokenHash: 1 }, { unique: true }),
     col.telemetry.createIndex({ ts: 1 }, { expireAfterSeconds: 30 * 86400 }),
     col.telemetry.createIndex({ appId: 1, type: 1, ts: -1 }),
   ])

@@ -27,6 +27,16 @@ const ACTION_LABEL: Record<string, string> = {
   'data.sync': '同步数据到正式环境',
   'kv.set': '修改应用配置',
   'kv.delete': '删除应用配置',
+  'api-client.create': '创建开放接口调用方',
+  'api-client.revoke': '吊销开放接口 token',
+  'api-client.delete': '删除开放接口调用方',
+  'openapi.query': '开放接口查询',
+  'openapi.stats': '开放接口统计',
+  'openapi.get': '开放接口读取单条',
+  'openapi.create': '开放接口新增数据',
+  'openapi.update': '开放接口修改数据',
+  'openapi.delete': '开放接口删除数据',
+  'openapi.export': '开放接口导出',
 }
 
 onMounted(async () => {
