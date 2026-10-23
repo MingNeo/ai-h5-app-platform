@@ -131,7 +131,7 @@ defineExpose({
       v-model="text"
       type="textarea"
       :autosize="{ minRows: 2, maxRows: 10 }"
-      :placeholder="disabled ? '只读权限，不能发送' : '描述你想要的功能或修改，例如：做一个报名表单，收集姓名和手机号'"
+      :placeholder="disabled ? '只读权限，不能发送' : '描述你想要的功能或修改，例如：做一个周末市集摊主招募页，或者直接说「做一个活动」，我来定形态'"
       :disabled="disabled"
       resize="none"
       class="composer-input"

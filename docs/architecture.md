@@ -1,6 +1,6 @@
 # 平台技术架构（实现说明）
 
-本文描述**当前代码实际如何运行**。产品目标、取舍和里程碑见 [design.md](design.md)；本地启动步骤见 [README](../README.md)。
+本文描述**当前代码实际如何运行**。产品目标、取舍和里程碑见 [design.md](design.md)；本地启动步骤见 [README](../README.md)；应用配置字段见 [manifest.md](manifest.md)；安全边界见 [security-boundary.md](security-boundary.md)。
 
 ## 1. 运行形态
 
@@ -138,8 +138,10 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 - 启动即请求 `/auth/me`；`requireLogin` 且未登录时进入登录门禁。
 - App 内走原生桥拉起登录，用「原生回调 + 回到前台 + 每 2s 轮询」三路检测，最多 2 分钟。
 - 浏览器内渲染 SDK 自己的登录弹窗（手机号 + 短信 + 极验），不依赖应用的技术栈。
-- 任何 `401`/`LOGIN_REQUIRED` 由 `withLogin()` 全局 single-flight 拉起一次登录，成功后重放请求。
+- 任何 `401`/`LOGIN_REQUIRED` 由 `withLogin()` 全局 single-flight 拉起一次登录，成功后重放请求。没有 `requireLogin` 的应用同样适用：游客先浏览，点到需要身份的操作才登录。
 - 页面可见时每 5 分钟、切回前台时检查身份；uid 变化强制 reload。
+
+登录要求本身由 `manifest.requireLogin` 控制（默认 `false`）。后台设置页的开关调用 `PUT /admin-api/apps/:appId/require-login`（`developer` 及以上），直接改草稿里的 `manifest.json` 并写审计 `app.requireLogin`；`dev` 立即生效，`beta` / `prod` 随发布生效。取消强制登录会在发布时生成确认项。
 
 ## 6. 平台网关（`/__platform/api/*`）
 
@@ -178,7 +180,10 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 实现见 [gateway/data.ts](../apps/server/src/modules/gateway/data.ts)：
 
 - 集合必须在当前渠道生效的 manifest 中声明：`dev` 用草稿，`beta` / `prod` 用对应 build 的 manifest。
-- ACL 在服务端强制：`private` / `public_read` / `submit_only` / `readonly` / `admin_only`；读过滤自动注入 `_owner`，写操作只能改自己创建的文档。
+- ACL 在服务端强制：`private` / `public_read` / `submit_only` / `public_submit` / `public_write` / `readonly` / `admin_only`。完整矩阵见 [manifest.md](manifest.md)。
+- 数据归属（actor）：登录用户用 `uid`；游客用 `app_vid` cookie 拼成 `vid:<值>`，没有 cookie 时退回 `ip:<客户端 IP>`。`_owner`、`mine()`、`perUserDocs`、唯一索引、写入限流都按 actor 计算。
+- `public_submit`：游客可新增，读自己的，不能改删；`public_write`：游客可新增，所有人可读，可改删自己设备提交的。其余 ACL 的新增/修改/删除仍要求登录。
+- 读过滤自动注入 `_owner`（`own` 范围）；写操作只能改自己创建的文档。
 - 写入前用 AJV 校验 `fields`（`additionalProperties: false`），拒绝 `_` 开头的系统字段和 `$` / `.` 开头的键；单条默认上限 16KB。
 - 系统字段由服务端写入：`_id`、`_owner`、`_ownerProfile`、`_createdAt`、`_updatedAt`。
 - 查询 DSL 只允许 `$eq $ne $gt $gte $lt $lte $in $nin $exists` 与 `$and/$or`，深度 ≤ 3、条件 ≤ 30、`limit` ≤ 100、`skip` ≤ 5000；`orderBy` 最多 3 个字段。
