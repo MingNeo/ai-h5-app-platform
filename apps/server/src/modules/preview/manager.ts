@@ -134,8 +134,11 @@ export function previewStatus(appId: string) {
 export async function proxyPreviewRequest(appId: string, req: http.IncomingMessage, res: http.ServerResponse, headers: (status: number, ct?: string) => Record<string, string>) {
   try {
     const r = await getPreview(appId)
+    // Vite 会把 index.html 里的根绝对路径自动补上 base；平台运行时文件只在根路径提供，需要还原
+    const platformPrefix = `${appPath(appId, 'dev')}/__platform/`
     proxyHttp(req, res, r.port, {
       setHeaders: (h, status) => headers(status, String(h['content-type'] ?? '')),
+      rewriteText: text => text.replaceAll(platformPrefix, '/__platform/'),
     })
   }
   catch (e) {
