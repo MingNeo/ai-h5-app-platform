@@ -20,7 +20,8 @@ manifest.json       应用配置：名称、是否强制登录、数据集合（
 admin.json          可选：应用后台视图（给运营看的数据页）
 src/main.ts         入口（一般不用改）
 src/router.ts       路由（history 模式，base 由平台注入，不要改）
-src/App.vue
+src/App.vue         根组件，只放 <router-view />
+src/layouts/*.vue   布局组件（含导航，内部再放一层 <router-view />）
 src/pages/*.vue     页面
 src/components/*.vue
 src/composables/*.ts
@@ -32,7 +33,9 @@ public/             原样拷贝的静态文件（用绝对路径 /xxx.png 引�
 规则：
 
 - 文件只能放在 `src/`、`public/` 下，或者是根目录的 `index.html`、`manifest.json`、`admin.json`。
-- 页面写成 `src/pages/*.vue`，在 `src/router.ts` 里注册路由；应用挂在 `/a/{appId}[--channel]/` 下，`createWebHistory(base)` 的 base 已由平台注入，不要写死。
+- 路由用**嵌套写法**：布局路由作为父级（`component: DefaultLayout`），页面放在 `children` 里；布局组件里写公共导航，再用 `<router-view />` 渲染子页面。
+- 子路由的 `path` 不要以 `/` 开头（`''` 表示布局根路径，`about` 表示 `/about`）；只有需要跳出布局的整页才用绝对路径。
+- 应用挂在 `/a/{appId}[--channel]/` 下，`createWebHistory(base)` 的 base 已由平台注入，不要写死；页面内跳转用 `<RouterLink>` 或 `router.push`，不要手写 `<a href="/xxx">`。
 - 相对导入可以省略扩展名，Vite 会处理；跨目录引用统一用 `@/`。
 - `/__platform/...` 下的平台文件由平台自动注入，不需要自己写 `<script src="/__platform/...">`。
 

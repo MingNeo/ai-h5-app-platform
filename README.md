@@ -76,7 +76,7 @@ make dev      # HTTPS proxy（:443）+ server（:3000）+ admin-web（:5173）
 
 ## 应用技术栈
 
-生成的应用是 **Vue 3 + Vite**：页面用 SFC（`.vue`），路由用 vue-router，组件库 Vant，样式用 UnoCSS。
+生成的应用是 **Vue 3 + Vite**：页面用 SFC（`.vue`），路由用 vue-router 的嵌套路由（布局组件 + `children`），组件库 Vant，样式用 UnoCSS。
 
 - 预览：server 为每个应用按需启动 Vite dev server，代理到 `/a/{appId}--dev/`，支持 HMR
 - 构建：Vite 打包成静态产物存进构建快照，测试版和线上版直接返回产物
