@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
-import { api } from '../../api'
+import { api, download } from '../../api'
 import { useAppStore } from '../../stores/app'
 
 const store = useAppStore()
@@ -108,7 +108,7 @@ async function remove(row: any) {
 }
 
 function exportCsv() {
-  window.open(`/admin-api/apps/${appId}/data/${env.value}/${current.value}/export`, '_blank')
+  void download(`/apps/${appId}/data/${env.value}/${current.value}/export`)
 }
 
 async function syncToProd() {

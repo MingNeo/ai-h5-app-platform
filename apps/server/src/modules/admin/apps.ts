@@ -1,4 +1,4 @@
-import { appHost, validateAppId } from '@app-platform/shared'
+import { appUrl, validateAppId } from '@app-platform/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { config } from '../../config'
@@ -13,9 +13,9 @@ import { appRole, requireAdmin, requireAppRole } from './auth'
 
 export function appUrls(appId: string) {
   return {
-    prod: `https://${appHost(appId, 'prod', config.baseDomain)}/`,
-    beta: `https://${appHost(appId, 'beta', config.baseDomain)}/`,
-    dev: `https://${appHost(appId, 'dev', config.baseDomain)}/`,
+    prod: appUrl(appId, 'prod', config.baseDomain),
+    beta: appUrl(appId, 'beta', config.baseDomain),
+    dev: appUrl(appId, 'dev', config.baseDomain),
   }
 }
 

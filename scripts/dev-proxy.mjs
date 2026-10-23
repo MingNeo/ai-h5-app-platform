@@ -1,7 +1,8 @@
 // 本地 HTTPS 入口（没有 Docker 时代替 nginx，规则与 deploy/nginx 一致）
-//   admin.<base>/admin-api/*  → server
-//   admin.<base>/*            → admin-web（Vite dev）
-//   其余 *.<base>             → server
+//   同一个域名下：
+//   /admin、/admin/...  → admin-web（Vite dev），/admin-api/* 除外
+//   /admin-api/*        → server
+//   其余（/a/*、/__platform/*、/healthz） → server
 // 用法：node scripts/dev-proxy.mjs   （macOS 10.14+ 普通用户可以监听 443）
 import { readFileSync } from 'node:fs'
 import http from 'node:http'
@@ -24,9 +25,13 @@ const ADMIN = { host: '127.0.0.1', port: Number(process.env.ADMIN_PORT || 5173) 
 
 function upstreamFor(req) {
   const host = (req.headers.host || '').split(':')[0]
-  if (!host.endsWith(`.${DOMAIN}`))
+  if (host !== DOMAIN)
     return null
-  if (host === `admin.${DOMAIN}` && !req.url.startsWith('/admin-api/'))
+  if (req.url.startsWith('/admin-api/'))
+    return SERVER
+  if (req.url === '/admin')
+    return { redirect: '/admin/' }
+  if (req.url.startsWith('/admin/'))
     return ADMIN
   return SERVER
 }
@@ -49,6 +54,10 @@ const server = https.createServer({
     res.writeHead(404).end('unknown host')
     return
   }
+  if (up.redirect) {
+    res.writeHead(301, { location: up.redirect }).end()
+    return
+  }
   const p = http.request({ ...up, method: req.method, path: req.url, headers: forwardedHeaders(req) }, (r) => {
     res.writeHead(r.statusCode, r.headers)
     r.pipe(res)
@@ -63,7 +72,7 @@ const server = https.createServer({
 
 server.on('upgrade', (req, socket, head) => {
   const up = upstreamFor(req)
-  if (!up)
+  if (!up || up.redirect)
     return socket.destroy()
   const conn = net.connect(up.port, up.host, () => {
     const lines = [`${req.method} ${req.url} HTTP/1.1`]
@@ -85,5 +94,5 @@ server.on('upgrade', (req, socket, head) => {
 })
 
 server.listen(PORT, () => {
-  console.log(`本地 HTTPS 入口已启动：https://admin.${DOMAIN}${PORT === 443 ? '' : `:${PORT}`}/`)
+  console.log(`本地 HTTPS 入口已启动：https://${DOMAIN}${PORT === 443 ? '' : `:${PORT}`}/admin/`)
 })

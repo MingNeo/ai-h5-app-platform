@@ -1,13 +1,13 @@
 import { readFileSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { type Channel, dataEnvOf } from '@app-platform/shared'
+import { type Channel, dataEnvOf, RESERVED_APP_IDS, APP_ID_RE, appPath } from '@app-platform/shared'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../../config'
 import { allowedBizPrefixes, approvedGrants, effectiveManifest, getApp } from '../../core/apps'
 import { resolveBizTarget } from '../../core/biz-docs'
 import { pushDevError } from '../../core/dev-errors'
-import { PREVIEW_COOKIE, previewCookieValue, readPreviewClaims, verifyPreviewTicket } from '../../core/preview-access'
+import { previewCookieName, previewCookieValue, readPreviewClaims, verifyPreviewTicket } from '../../core/preview-access'
 import { blobs } from '../../lib/blob'
 import { err } from '../../lib/errors'
 import { ok } from '../../lib/http'
@@ -47,8 +47,18 @@ const NO_SDK_HEADER = new Set([
   '/__platform/tailwind.js',
 ])
 
+/** 平台共享的运行时文件与应用无关，不解析 appId */
+const PLATFORM_ASSETS = new Set([
+  '/__platform/dom.js',
+  '/__platform/ui.js',
+  '/__platform/ui.css',
+  '/__platform/tailwind.js',
+])
+
 /** 不转发给上游的平台 cookie（后台会话、预览票据、预览身份） */
-const PLATFORM_COOKIES = new Set(['__Host-app_admin', PREVIEW_COOKIE, MOCK_COOKIE])
+function isPlatformCookie(name: string) {
+  return name === '__Host-app_admin' || name.startsWith('__Host-app_preview') || name === MOCK_COOKIE
+}
 
 /** 转发主站 cookie（sess 等），平台自己的 cookie 全部剔除 */
 function forwardCookie(header?: string) {
@@ -57,9 +67,30 @@ function forwardCookie(header?: string) {
   return header.split(';').map(s => s.trim()).filter(Boolean)
     .filter((pair) => {
       const i = pair.indexOf('=')
-      return i > 0 && !PLATFORM_COOKIES.has(pair.slice(0, i))
+      return i > 0 && !isPlatformCookie(pair.slice(0, i))
     })
     .join('; ')
+}
+
+function queryOf(req: FastifyRequest, name: string): string | undefined {
+  const i = req.url.indexOf('?')
+  if (i < 0)
+    return undefined
+  return new URLSearchParams(req.url.slice(i + 1)).get(name) ?? undefined
+}
+
+const CHANNELS = new Set(['prod', 'beta', 'dev'])
+
+/**
+ * 应用身份来自 SDK 请求头（或支持不带头的查询参数：sendBeacon、图片）。
+ * 平台已放弃应用间的 origin 隔离，appId 可被应用代码修改，按已接受的风险处理。
+ */
+function appLocator(req: FastifyRequest): { appId: string, channel: Channel } | null {
+  const appId = String(req.headers['x-app-id'] ?? queryOf(req, 'app') ?? '')
+  const rawChannel = String(req.headers['x-app-channel'] ?? queryOf(req, 'channel') ?? 'prod')
+  if (!APP_ID_RE.test(appId) || RESERVED_APP_IDS.has(appId) || !CHANNELS.has(rawChannel))
+    return null
+  return { appId, channel: rawChannel as Channel }
 }
 
 async function identity(req: FastifyRequest) {
@@ -83,12 +114,12 @@ export function registerGateway(app: FastifyInstance) {
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/__platform/'))
       return
-    const site = req.site
-    if (site?.kind !== 'app')
-      throw err.notFound()
     if (req.method === 'OPTIONS')
       return reply.status(403).send()
     const path = req.url.split('?')[0]!
+    // 平台运行时文件与应用无关，直接放行
+    if (PLATFORM_ASSETS.has(path))
+      return
     const isFileGet = req.method === 'GET' && path.startsWith('/__platform/api/files/')
     if (!NO_SDK_HEADER.has(path) && !isFileGet) {
       if (req.headers['x-app-sdk'] !== '1')
@@ -99,12 +130,18 @@ export function registerGateway(app: FastifyInstance) {
     }
     if (!await rateLimit(`ip:${req.ip}`, config.limits.apiPerMinutePerIp, 60))
       throw err.rate()
-    const doc = await getApp(site.appId)
+    // 预览票据换 cookie：appId 与渠道从票据里取，不信任其它输入
+    if (path === '/__platform/preview-auth')
+      return
+    const loc = appLocator(req)
+    if (!loc)
+      throw err.notFound()
+    const doc = await getApp(loc.appId)
     if (!doc)
       throw err.notFound('应用不存在')
-    if (site.channel !== 'prod' && path !== '/__platform/preview-auth' && !readPreviewClaims(req.headers.cookie, site.appId))
+    if (loc.channel !== 'prod' && !readPreviewClaims(req.headers.cookie, loc.appId))
       throw err.forbidden('需要预览权限')
-    req.appCtx = { appId: site.appId, channel: site.channel }
+    req.appCtx = { appId: loc.appId, channel: loc.channel }
   })
 
   // 平台 SDK + 应用配置
@@ -141,12 +178,13 @@ export function registerGateway(app: FastifyInstance) {
 
   // 后台预览票据换 cookie
   app.get('/__platform/preview-auth', async (req, reply) => {
-    const { appId } = req.appCtx!
     const q = req.query as { t?: string, next?: string }
-    const claims = verifyPreviewTicket(q.t, appId)
+    const claims = verifyPreviewTicket(q.t)
     if (!claims)
       return reply.status(403).type('text/html; charset=utf-8').send('<p>预览链接已过期，请回到后台重新打开</p>')
-    reply.setCookie(PREVIEW_COOKIE, previewCookieValue(appId, claims.uid, claims.identity), {
+    if (!await getApp(claims.appId))
+      return reply.status(403).type('text/html; charset=utf-8').send('<p>应用不存在或已删除</p>')
+    reply.setCookie(previewCookieName(claims.appId), previewCookieValue(claims.appId, claims.uid, claims.identity), {
       path: '/',
       httpOnly: true,
       secure: true,
@@ -154,7 +192,7 @@ export function registerGateway(app: FastifyInstance) {
       maxAge: 24 * 3600,
     })
     const next = typeof q.next === 'string' && q.next.startsWith('/') && !q.next.startsWith('//') ? q.next : '/'
-    return reply.redirect(next)
+    return reply.redirect(`${appPath(claims.appId, claims.channel)}${next === '/' ? '/' : next}`)
   })
 
   app.get('/__platform/api/auth/me', async (req) => {
@@ -268,7 +306,8 @@ export function registerGateway(app: FastifyInstance) {
       public: isPublic,
       createdAt: Date.now(),
     })
-    return ok({ fileId, url: `/__platform/api/files/${fileId}`, size, mime: file.mime })
+    // <img>/<a> 不会带自定义头，appId 与渠道放进 URL
+    return ok({ fileId, url: `/__platform/api/files/${fileId}?app=${encodeURIComponent(ctx.appId)}&channel=${encodeURIComponent(req.appCtx!.channel)}`, size, mime: file.mime })
   })
   app.get('/__platform/api/files/:id', async (req, reply: FastifyReply) => {
     const ctx = await dataCtx(req)

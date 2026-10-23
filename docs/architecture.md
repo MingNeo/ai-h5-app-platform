@@ -11,7 +11,7 @@
         │ HTTPS
         ▼
 nginx（线上 ingress / 本地 scripts/dev-proxy.mjs）
-        │ 按 Host 分流
+        │ 按路径分流
         ▼
 server（Fastify，单进程，可水平扩容）
  ├ admin-api        后台接口
@@ -42,7 +42,7 @@ server（Fastify，单进程，可水平扩容）
 ```
 apps/server          Fastify 服务端
   src/config.ts      环境变量解析
-  src/app.ts         路由装配、Host 解析、admin 静态资源、预览代理
+  src/app.ts         路由装配、路径解析、admin 静态资源、预览代理
   src/core/          应用、草稿、快照、校验、业务接口文档
   src/modules/
     admin/           后台登录、应用/成员、文件、数据台、能力审批、发布、监控
@@ -58,30 +58,34 @@ packages/shared      manifest/DSL/事件协议/OpenAPI 解析
 packages/app-guard   生成代码安全扫描
 packages/agent-docs  给模型看的规则、SDK、manifest 文档
 deploy/              Dockerfile、nginx 模板、本地证书
-scripts/             dev 编排、泛域名 DNS、HTTPS 代理、冒烟测试
+scripts/             dev 编排、HTTPS 代理、冒烟测试
 ```
 
-运行时不执行应用代码：没有编译和打包，`index.html` 和 `src/**/*.js` 原样返回，浏览器直接执行。原子类由浏览器端的 `/__platform/tailwind.js` 扫描 DOM 生成；没有组件库，界面由原生标签 + Tailwind 组合，小工具从 `/__platform/dom.js` 导入（[packages/app-template/platform/index.mjs](../packages/app-template/platform/index.mjs)）。
+运行时不执行应用代码：没有编译和打包，`index.html` 和 `src/**/*.js` 直接返回（仅对指向应用文件的根路径引用补 `/a/{appId}/` 前缀），浏览器直接执行。原子类由浏览器端的 `/__platform/tailwind.js` 扫描 DOM 生成；没有组件库，界面由原生标签 + Tailwind 组合，小工具从 `/__platform/dom.js` 导入（[packages/app-template/platform/index.mjs](../packages/app-template/platform/index.mjs)）。
 
-## 3. 域名与请求分流
+## 3. 入口域名与请求分流
 
-Host 解析见 [packages/shared/src/app-id.ts](../packages/shared/src/app-id.ts)：
+平台只有一个入口域名，站点由**路径**区分（解析见 [packages/shared/src/app-id.ts](../packages/shared/src/app-id.ts)）：
 
-| Host | 含义 | 数据环境 |
+| 路径 | 含义 | 数据环境 |
 |---|---|---|
-| `admin.<base>` | 后台 | — |
-| `{appId}.<base>` | 线上版 | `prod` |
-| `{appId}--beta.<base>` | 测试版 | `dev` |
-| `{appId}--dev.<base>` | 实时预览 | `dev` |
+| `/admin`、`/admin/...` | 后台 SPA | — |
+| `/admin-api/...` | 后台接口 | — |
+| `/a/{appId}/...` | 线上版 | `prod` |
+| `/a/{appId}--beta/...` | 测试版 | `dev` |
+| `/a/{appId}--dev/...` | 实时预览 | `dev` |
+| `/__platform/...` | 平台运行时、SDK、网关接口 | 由请求头决定 |
+| `/healthz` | 健康检查 | — |
 
 - `appId` 为 3–30 位小写字母/数字/连字符，不能含 `--`；`admin`、`api`、`www` 等是保留字。
-- nginx 只做 Host 透传和 HTTPS 终止，**不注入** `X-App-Id`；server 自己按 `Host` 解析站点（[apps/server/src/app.ts](../apps/server/src/app.ts)）。因此 Pod 不能直接暴露公网。
-- 本地由 `scripts/dev-proxy.mjs` 复刻同一套分流：`admin.<base>` 默认转发 admin-web（Vite :5173），`/admin-api/*` 和其余应用域名转发 server（:3000）。
-- 泛域名由 `scripts/dev-dns.mjs` 在 `127.0.0.1:5354` 应答，macOS 通过 `/etc/resolver/<base>` 接入，无需改 hosts。
+- nginx 只做 HTTPS 终止和反向代理，**不注入**任何身份头；server 按路径解析站点（[apps/server/src/app.ts](../apps/server/src/app.ts)）。
+- 应用代码里的根路径引用（`/src/app.js`、`/logo.png`）在返回时被重写为 `/a/{appId}[--channel]/...`；只有能对应到应用文件的路径才会重写，避免误伤 `platform.biz.request('/api/...')`。
+- 后台如果走 nginx 静态托管，`/admin/` 需要透传 server 返回的 COOP / XFO / CSP 头。
+- 本地由 `scripts/dev-proxy.mjs` 复刻同一套分流：`/admin/` 转发 admin-web（Vite :5173），其余转发 server（:3000）。只需要一个 `/etc/hosts` 记录，不再需要泛域名 DNS。
 
 `/*` 最终处理顺序：
 
-1. `admin` → 读 `apps/admin-web/dist`，找不到构建产物时提示走 nginx。
+1. `admin` 路径 → 读 `apps/admin-web/dist`（`/admin` 前缀已剥离），SPA 路由回退 `index.html`。
 2. `dev` 渠道 → 校验预览 cookie，通过后由 `serveAppDraft()` 直接返回草稿文件。
 3. `prod` / `beta` → `serveAppBuild()` 返回对应构建记录里的文件清单（内容就是源码）。
 
@@ -91,30 +95,34 @@ Host 解析见 [packages/shared/src/app-id.ts](../packages/shared/src/app-id.ts)
 
 应用源码以文件清单（path + blob hash）存在 `builds` 文档里，文件内容在 `blobs` 集合（内容寻址，SHA-256）。`serveAppBuild()`（[app-host.ts](../apps/server/src/modules/host/app-host.ts)）：
 
-- `index.html` 缺少的平台标签由服务端注入：`boot.js`、`ui.css`、`tailwind.js`。应用删掉也一定生效。
+- 应用文件挂在 `/a/{appId}[--channel]/` 下；`serveFiles()` 用去掉前缀后的路径查文件清单。
+- 文本文件（html/js/css/svg）里的根绝对引用会补上应用前缀，改写结果按构建 + 路径缓存；只改写能匹配到应用文件的路径。
+- `index.html` 缺少的平台标签由服务端注入：`boot.js?app=...&channel=...`、`ui.css`、`tailwind.js`。应用删掉也一定生效。
 - 三个渠道的 `index.html` 都返回 `no-store`；beta / prod 的其他文件 60s 缓存并带 ETag。
-- 未知无扩展名路径回退 `index.html`，支持 history 路由。
-- `.map` 一律 404。
-- 平台运行时文件由 [platform-assets.ts](../apps/server/src/modules/host/platform-assets.ts) 提供：`dom.js`、`ui.js`、`ui.css`、`tailwind.js`，都带一天缓存。
+- 未知无扩展名路径回退 `index.html`，支持 history 路由；多页应用可以直接放 `about.html` 或 `about/index.html`。
+- `.map` 一律 404；`admin.json` 也不通过应用路径返回。
+- 平台运行时文件由 [platform-assets.ts](../apps/server/src/modules/host/platform-assets.ts) 提供：`dom.js`、`ui.js`、`ui.css`、`tailwind.js`，都带一天缓存，路径保持根路径、跨应用共享。
 - 下线、未到活动时间、已结束、未发布时返回平台占位页。
-- 响应统一带 CSP 与安全头（[csp.ts](../apps/server/src/modules/host/csp.ts)）：`default-src 'self'`、`script-src 'self'`、`style-src 'self' 'unsafe-inline'`、`frame-src 'none'`、`frame-ancestors 'self' admin`。业务接口走同源代理，因此不需要放行业务域名。
+- 响应统一带 CSP 与安全头（[csp.ts](../apps/server/src/modules/host/csp.ts)）：`default-src 'self'`、`script-src 'self'`、`style-src 'self' 'unsafe-inline'`、`frame-src 'none'`、`frame-ancestors 'self'`。业务接口走同源代理，因此不需要放行业务域名。
 
 ### 实时预览
 
-1. 后台调用 `POST /admin-api/apps/:appId/preview-url` 签发短期票据（普通 10 分钟，二维码 30 分钟）。
-2. 浏览器访问 `https://{appId}--dev.<base>/__platform/preview-auth?t=...`，服务端校验票据后写入 `__Host-app_preview` cookie（24h，HttpOnly、Secure、SameSite=Lax），再 302 到应用路径。
-3. `dev` 渠道的页面请求和 HMR 都要求该 cookie；没有则返回「需要预览权限」占位页。
+1. 后台调用 `POST /admin-api/apps/:appId/preview-url` 签发短期票据（普通 10 分钟，二维码 30 分钟），票据里带 appId 和渠道。
+2. 浏览器访问 `/__platform/preview-auth?t=...&next=...`，服务端校验票据后写入 `__Host-app_preview__{appId}` cookie（24h，HttpOnly、Secure、SameSite=Lax），再 302 到 `/a/{appId}--dev/{next}`。
+3. `dev` / `beta` 渠道的页面请求和平台接口都要求该 cookie；没有则返回「需要预览权限」占位页。
 4. 预览直接返回草稿文件（`serveAppDraft()`），没有 dev server、没有 HMR；刷新页面即可看到最新代码。
-5. `public/` 下的文件在预览时按根路径访问。
+5. `public/` 下的文件按应用根路径访问（各渠道一致）。
 6. 预览身份可锁定为 `self` / `guest` / `test`，由票据声明；`guest` 和 `test` 会覆盖主站 cookie 的解析结果。
+7. cookie 名带 appId，可以同时预览多个应用；claims 里的 appId 也会校验，不能拿 A 的票据预览 B。
 
 ## 5. 身份与登录
 
 ### 后台
 
-- 飞书 OAuth；本地 `DEV_ADMIN_BYPASS=1` 时可用 `/admin-api/auth/dev-login`。
-- 会话是随机 token，存在 `store`（Redis 或内存），cookie 为 `__Host-app_admin`，HttpOnly、Secure、SameSite=Strict，7 天。
-- `/admin-api/*` 的非 GET 请求必须带 `X-App-Admin: 1`，且 `Origin` 必须等于 `ADMIN_ORIGIN`；OPTIONS 直接 403。后台不开放 CORS，用自定义头阻止跨站表单提交。
+- 只支持飞书 OAuth；本地 `DEV_ADMIN_BYPASS=1` 时可用 `/admin-api/auth/dev-login`。
+- 后台与应用**同源**，因此**不使用 cookie 会话**。飞书回调签发 60 秒一次性票据，302 到 `/admin#t=...`；SPA 用 `POST /admin-api/auth/exchange` 换 Bearer token，只存内存（刷新后静默重登）。
+- `/admin-api/*` 只认 `Authorization: Bearer`，没有 cookie 回退；非 GET 仍校验 `Origin`；OPTIONS 直接 403；不开放 CORS。
+- `/admin` 文档返回 `Cross-Origin-Opener-Policy: same-origin`、`X-Frame-Options: DENY`、`frame-ancestors 'none'`，阻止应用页面通过 popup / iframe 拿到 token。细节见 [security-boundary.md](security-boundary.md)。
 - 角色：平台管理员、应用 `owner` / `developer` / `viewer`。平台管理员对所有应用等价于 owner。
 
 ### 应用端
@@ -137,7 +145,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 
 入口中间件（[gateway/index.ts](../apps/server/src/modules/gateway/index.ts)）依次校验：
 
-1. Host 必须是应用域名。
+1. 请求必须带合法的 appId（SDK 请求头或查询参数）。
 2. OPTIONS 一律 403。
 3. 除 `boot.js`、`preview-auth`、`telemetry` 和文件 GET 外，必须带 `X-App-SDK: 1`。
 4. 带 `Sec-Fetch-Site` 时必须是 `same-origin`。
@@ -314,7 +322,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
-| `APP_BASE_DOMAIN` | 无（必填） | 基础域名；未配置时服务启动报错 |
+| `APP_BASE_DOMAIN` | 无（必填） | 平台唯一入口域名（如 `apps.example.com`）；未配置时服务启动报错 |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | server 监听 |
 | `MONGO_URL` | `mongodb://127.0.0.1:27017/app_platform` | `memory` 启动内置 mongod |
 | `REDIS_URL` | 空 | 空则用进程内存 |
@@ -350,10 +358,10 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 ## 11. 安全不变量
 
 1. 应用代码按不可信处理：不执行、不带 shell、构建配置和依赖由平台锁定。
-2. 应用只能访问自身文件和同源 `/__platform/*`；CSP 禁止外部脚本、样式、字体、图片、音视频和外部请求。
+2. 应用只能访问自身文件和同源 `/__platform/*`；CSP 禁止外部脚本、样式、字体、图片、音视频和外部请求。应用之间共享 origin，隔离已按产品决策放弃（见 [security-boundary.md](security-boundary.md)）。
 3. 应用不能读写 `document.cookie`、不能直接调原生桥、不能注册 Service Worker、不能 `eval` / `new Function` / 内联脚本；由 app-guard 在 `check` 和构建时阻断。
-4. 平台网关拒绝跨站调用：自定义头 + 拒绝 OPTIONS + `Sec-Fetch-Site` 校验。
-5. 后台非 GET 请求要求自定义头和 Origin 校验；后台 cookie 使用 `__Host-` + `SameSite=Strict`。
+4. 平台网关拒绝跨站调用：自定义头 + 拒绝 OPTIONS + `Sec-Fetch-Site` 校验；appId 来自请求头/参数，可被应用伪造（已接受的风险）。
+5. 后台只认 `Authorization: Bearer`，不使用 cookie；`/admin` 必须带 COOP、`X-Frame-Options: DENY`、`frame-ancestors 'none'`。
 6. 数据访问由服务端强制 ACL 和 owner 条件，DSL 只允许白名单操作符，文档键禁止 `$` 和 `.`。
 7. 业务接口只允许已审批前缀，上游地址只由平台管理员配置，客户端无法指定。
 8. 发布切换只由 owner 操作；放宽权限、删除集合/字段必须显式确认。
@@ -365,7 +373,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | 独立 `build-worker`、BullMQ | 同进程校验循环 + Redis 锁；`ROLES` 可拆分部署，但代码未拆包 |
 | 对象存储（COS） | 默认全部存 Mongo `blobs`，接口已抽象为 `BlobStore`，后续可替换 |
 | 独立 `preview` StatefulSet | 不需要：草稿文件由 `api` 直接返回，没有 dev server 和 HMR |
-| nginx 注入 `X-App-Id` / `X-App-Channel` | server 直接解析 `Host`，更少信任边界 |
+| 每个应用一个子域 | 单域名 + `/a/{appId}/` 路径；运维只需一条 DNS、一张普通证书（应用间 origin 隔离随之放弃，见 security-boundary） |
 | 手写 demo 应用 | 模板初始化 + `make seed` 生成 demo |
 | Vue3 + Vant + 构建 | 纯 HTML + 原生 ESM；Tailwind v4 浏览器运行时，零编译零打包 |
 
@@ -379,7 +387,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 - 写入口有三个：应用对话里 AI 通过 `write_file` 写（[tools.ts](../apps/server/src/modules/agent/tools.ts) 写入前校验）；后台「后台视图」页直接编辑（`PUT /admin-api/apps/:appId/admin-view`）；后台「AI 生成」用一句话生成（`POST /admin-api/apps/:appId/admin-view/ai`，只返回配置不落盘，按人 10 次/分钟限流）。
 - 配置规范在 [agent-docs/admin-view.md](../packages/agent-docs/docs/admin-view.md)，模型通过 `read_docs('admin-view')` 读取，后台「配置说明」按钮读同一份（`GET /admin-api/apps/:appId/admin-view/doc`）。
 - 归属草稿文件，随快照和发布流转：`env=dev` 读草稿，`env=prod` 读线上构建快照里的同一文件。
-- `admin.json` **不会**通过应用域名返回（[app-host.ts](../apps/server/src/modules/host/app-host.ts) 直接 404），避免暴露运营配置。
+- `admin.json` **不会**通过应用路径返回（[app-host.ts](../apps/server/src/modules/host/app-host.ts) 直接 404），避免暴露运营配置。
 
 ### 数据聚合
 

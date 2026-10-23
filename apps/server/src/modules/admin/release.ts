@@ -1,4 +1,4 @@
-import { appHost } from '@app-platform/shared'
+import { appUrl } from '@app-platform/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { config } from '../../config'
@@ -22,11 +22,11 @@ export function registerReleaseRoutes(app: FastifyInstance) {
       /** 二维码用：有效期更短 */
       qr: z.boolean().default(false),
     }), req.body)
-    const host = appHost(appId, body.channel, config.baseDomain)
+    const origin = `https://${config.baseDomain}`
     if (body.channel === 'prod')
-      return ok({ url: `https://${host}${body.path}` })
-    const t = issuePreviewTicket(appId, user._id, body.identity, body.qr ? 30 * 60 : 10 * 60)
-    return ok({ url: `https://${host}/__platform/preview-auth?t=${encodeURIComponent(t)}&next=${encodeURIComponent(body.path)}` })
+      return ok({ url: `${appUrl(appId, 'prod', config.baseDomain)}${body.path.replace(/^\/+/, '')}` })
+    const t = issuePreviewTicket(appId, body.channel, user._id, body.identity, body.qr ? 30 * 60 : 10 * 60)
+    return ok({ url: `${origin}/__platform/preview-auth?t=${encodeURIComponent(t)}&next=${encodeURIComponent(body.path)}` })
   })
 
   app.get('/admin-api/apps/:appId/dev-errors', async (req) => {

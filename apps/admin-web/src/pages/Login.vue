@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { api } from '../api'
+import { api, setToken } from '../api'
 import { useUserStore } from '../stores/user'
 
 const route = useRoute()
@@ -13,10 +13,17 @@ const loading = ref(false)
 
 const redirect = () => (typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/') ? route.query.redirect : '/')
 
+const LOGIN_TRIED = 'adm_login_tried'
+
 onMounted(async () => {
   if (await user.load())
     return router.replace(redirect())
   options.value = await api('/auth/options')
+  // token 只存在内存，刷新后丢一次；自动走一次飞书静默登录，失败/取消后不再自动跳
+  if (options.value?.feishu && !options.value.devBypass && !sessionStorage.getItem(LOGIN_TRIED)) {
+    sessionStorage.setItem(LOGIN_TRIED, '1')
+    feishuLogin()
+  }
 })
 
 function feishuLogin() {
@@ -26,7 +33,9 @@ function feishuLogin() {
 async function devLogin() {
   loading.value = true
   try {
-    await api('/auth/dev-login', { body: { name: devName.value } })
+    const res = await api<{ token: string }>('/auth/dev-login', { body: { name: devName.value } })
+    setToken(res.token)
+    sessionStorage.removeItem(LOGIN_TRIED)
     await user.load()
     await router.replace(redirect())
   }
