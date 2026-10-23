@@ -78,9 +78,9 @@ make dev      # HTTPS proxy（:443）+ server（:3000）+ admin-web（:5173）
 
 生成的应用是**纯 HTML + 原生 ES 模块**：没有编译、没有打包、没有 npm 依赖。
 
-- 多页优先：每个页面可以是独立的完整 HTML，页面之间的跳转由应用自己决定
+- 页面用**子路由**组织：`src/router.js` 提供嵌套路由，布局组件 + `children` 复用导航；仍支持放独立的多页 HTML
 - 预览和线上都直接返回源码，刷新页面即可看到改动
 - 原子类由浏览器端的 Tailwind v4 运行时生成；没有组件库，界面用原生标签 + Tailwind 组合
 - 平台提供 `/__platform/dom.js`、`/__platform/ui.js`、`/__platform/ui.css`，由 server 注入 `index.html`
 - 「构建」只做校验（manifest、安全扫描、业务接口核对、JS 语法），不产出构建物
-- 应用源码里的根路径引用（如 `/src/app.js`、`/logo.png`）在返回时自动补上 `/a/{appId}[--channel]/` 前缀；新代码建议直接写相对路径
+- 应用源码里的根路径引用（如 `/src/app.js`、`/logo.png`）在返回时自动补上 `/a/{appId}[--channel]/` 前缀；应用内跳转用 `href()` 或相对路径

@@ -30,13 +30,15 @@
   - `import { el, mount, $, $$, clear, delegate, esc } from '/__platform/dom.js'`：创建节点、挂载、事件委托、转义
   - `import { toast, dialog } from '/__platform/ui.js'`：轻提示、确认框（原生 `<dialog>` 实现，自带焦点和 ESC）
 
-## 目录结构与多页
+## 目录结构与子路由
 
 ```
 index.html          应用外壳：标题、meta、<div id="app"> 和入口 <script type="module" src="/src/app.js">
 manifest.json       应用配置：名称、是否强制登录、数据集合（ACL/字段/索引/限制）、能力、业务接口
-about.html          可选：独立页面，完整的 HTML 文档
-src/app.js          入口：import 页面模块并挂载
+admin.json          可选：应用后台视图（给运营看的数据页）
+src/app.js          入口：注册路由并挂载
+src/router.js       平台提供的客户端路由（嵌套路由），入口已接好，一般不用改
+src/layouts/*.js    布局：接收 child() 渲染子页面，放公共导航
 src/pages/*.js      页面模块，导出一个返回 DOM 节点的函数
 src/components/*.js 可复用片段
 src/styles.css      应用自己的 CSS（可选）
@@ -46,9 +48,10 @@ public/             静态文件（按应用根路径访问，/logo.png → publ
 
 规则：
 
-- 文件只能放在 `src/`、`public/` 下，或者是根目录的 `index.html`、`about.html` 这类页面文件、`manifest.json`。
-- **优先多页**：每个页面可以是独立的完整 HTML（自己的 `<head>`、`<title>`），页面之间用普通链接跳转，应用内部路由由应用自己决定。需要多步交互、保留状态的页面才用单页。
-- 页面链接写相对路径（`./about.html` 或 `about/`）；平台会给根路径引用补上 `/a/{appId}[--channel]/` 前缀，但相对路径更稳。
+- 文件只能放在 `src/`、`public/` 下，或者是根目录的 `index.html`、`manifest.json`、`admin.json`。
+- **页面用子路由组织**：在 `src/app.js` 的路由表里加 `children`，页面写成 `src/pages/*.js`；布局组件里调用 `child()` 渲染子页面。需要独立整页时才用多页 HTML。
+- 子路由的 `path` 不要以 `/` 开头（`''` 表示布局根路径，`about` 表示 `/about`）；页面内跳转用 `<a href={href('/about')}>`（`href` 来自 `src/router.js`）或 `router.navigate('/about')`，不要写死 `/a/...`。
+- 平台已自动拦截站内 `<a>` 点击并走 history 路由；外链加 `data-external` 属性。
 - **相对导入必须带 `.js` 扩展名**：`import { renderHome } from './pages/home.js'`。浏览器不会自动补全。
 - `/__platform/...` 下的平台文件路径保持不变，平台会自动注入入口脚本，不需要自己写 `<script src="/__platform/...">`。
 - 不要创建 `package.json`、`vite.config.*`、`postcss.config.*`、`uno.config.*`、`tailwind.config.*`、`.env` 等工具链配置文件，平台会拒绝。

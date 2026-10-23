@@ -159,6 +159,7 @@ export function registerGateway(app: FastifyInstance) {
     const cfg = {
       appId,
       channel,
+      base: appPath(appId, channel),
       version: buildId ?? '0',
       sdkVersion: '1',
       requireLogin: Boolean(manifest?.requireLogin),
