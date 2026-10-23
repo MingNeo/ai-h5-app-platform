@@ -27,7 +27,7 @@ const groupTotal = ref(0)
 const loadingGroup = ref(false)
 const kvDialog = ref<{ key: string, json: string, isNew: boolean } | null>(null)
 
-const ACL_LABEL: Record<string, string> = { private: '仅本人', public_read: '公开读', submit_only: '仅提交', readonly: '只读配置', admin_only: '仅后台' }
+const ACL_LABEL: Record<string, string> = { private: '仅本人', public_read: '公开读', submit_only: '仅提交', public_submit: '游客可提交', public_write: '游客可读写', readonly: '只读配置', admin_only: '仅后台' }
 const currentCol = computed(() => collections.value.find(c => c.name === current.value))
 const columns = computed(() => Object.keys(currentCol.value?.fields ?? {}))
 

@@ -45,14 +45,22 @@ function countModelCalls(t: TurnView) {
   return t.segments.filter(s => s.kind === 'tools').length + 1
 }
 
-const SUGGESTIONS = [
-  '做一个活动报名表单，收集姓名、手机号和参加场次，提交后展示报名成功',
-  '做一个投票页面，3 个选项，每人一票，实时显示票数和占比',
+const SUGGESTION_POOL = [
+  '做一个 7 天读书打卡，每天写一句感想，显示连续打卡天数',
+  '做一个周末市集摊主招募页，填写摊位类型和联系方式，运营审核',
+  '做一个接龙：30 个名额的露营活动，满员自动关闭',
+  '做一个照片征集墙，每人传一张图加一句话，按点赞排序',
+  '做一个抽签分组页，报名后随机分成 4 队并公布结果',
   '做一个 H5 小游戏：接住掉落的红包，60 秒倒计时，结束后上传成绩到排行榜',
   '做一个记账小工具，记录每笔收支，按月汇总并显示饼图',
-  '做一个问卷调查，5 道选择题，提交后感谢页',
+  '做一个心愿墙，匿名发布心愿，可以给别人的心愿「加油」',
+  '做一个新人知识竞赛：10 道单选题，答完出分数和排名',
+  '做一个预约页：选日期和时段，每个时段限 5 人',
   '给现有页面加一个排行榜，显示前 20 名',
 ]
+
+// 每次打开空白会话换一批，避免把应用形态固化成固定的几种
+const SUGGESTIONS = [...SUGGESTION_POOL].sort(() => Math.random() - 0.5).slice(0, 6)
 
 async function loadSessions() {
   const res = await api<{ sessions: SessionItem[], todayTokens: number }>(`/apps/${props.appId}/sessions`)
@@ -321,6 +329,9 @@ onBeforeUnmount(() => unsub?.())
               </div>
               <div class="text-[var(--muted)] mt-2">
                 描述越具体，生成效果越好。可以引用截图或设计稿。
+              </div>
+              <div class="text-12px text-[var(--muted)] mt-1">
+                下面的只是示例，任何形态都可以做。
               </div>
             </div>
             <div class="grid grid-cols-2 gap-3">

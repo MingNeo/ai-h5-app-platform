@@ -2,6 +2,14 @@
 
 内部员工在后台用对话式 vibe coding 生成 H5 应用，发布到同一个域名下的 `/a/{appId}/`。设计与实现说明见 [docs/design.md](docs/design.md)、[docs/architecture.md](docs/architecture.md)，安全边界见 [docs/security-boundary.md](docs/security-boundary.md)。
 
+开发者文档：
+
+- [docs/architecture.md](docs/architecture.md)：当前代码实际如何运行（路由、鉴权、数据、构建发布）
+- [docs/manifest.md](docs/manifest.md)：应用配置 `manifest.json` 参考（集合、ACL、字段、索引、限制、发布影响）
+- [docs/design.md](docs/design.md)：产品目标、取舍与里程碑
+- [docs/security-boundary.md](docs/security-boundary.md)：单域名同源带来的边界与已接受风险
+- [deploy/nginx/README.md](deploy/nginx/README.md)：部署与运维
+
 要求：Node >= 22.12、pnpm 12.5。
 
 ## 部署形态

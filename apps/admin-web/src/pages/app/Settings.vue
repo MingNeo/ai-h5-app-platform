@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { computed, reactive } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { api } from '../../api'
 import { useAppStore } from '../../stores/app'
@@ -14,6 +14,21 @@ const form = reactive({
   description: app.description,
   range: [app.schedule?.startAt ?? null, app.schedule?.endAt ?? null] as [string | null, string | null],
 })
+const loginForm = reactive({ requireLogin: Boolean(app.manifest?.requireLogin) })
+const savingLogin = ref(false)
+
+async function saveLogin() {
+  savingLogin.value = true
+  try {
+    await api(`/apps/${app.appId}/require-login`, { method: 'PUT', body: { requireLogin: loginForm.requireLogin } })
+    await store.load(app.appId)
+    loginForm.requireLogin = Boolean(store.app?.manifest?.requireLogin)
+    ElMessage.success('已保存')
+  }
+  finally {
+    savingLogin.value = false
+  }
+}
 
 async function saveBasic() {
   await api(`/apps/${app.appId}`, { method: 'PATCH', body: { name: form.name, description: form.description } })
@@ -73,6 +88,28 @@ async function remove() {
           <el-button type="primary" :disabled="!store.canEdit()" @click="saveBasic">
             保存
           </el-button>
+        </el-form-item>
+      </el-form>
+    </div>
+    <div class="bg-white rounded-xl p-5 border border-[var(--border)]">
+      <div class="font-600 mb-3">
+        登录
+      </div>
+      <div class="text-13px text-[var(--muted)] mb-3">
+        默认游客可访问；未登录时，只有需要用户身份的接口（写入、私有数据、业务接口）才会自动拉起登录。
+      </div>
+      <el-form label-width="90px">
+        <el-form-item label="必须登录">
+          <div class="flex items-center gap-2">
+            <el-switch v-model="loginForm.requireLogin" :disabled="!store.canEdit()" />
+            <span class="text-13px text-[var(--muted)]">{{ loginForm.requireLogin ? '打开应用前必须先登录' : '游客可先浏览，按需登录' }}</span>
+          </div>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :disabled="!store.canEdit()" :loading="savingLogin" @click="saveLogin">
+            保存
+          </el-button>
+          <span class="text-12px text-[var(--muted)] ml-2">开发预览立即生效，线上需发布后生效</span>
         </el-form-item>
       </el-form>
     </div>

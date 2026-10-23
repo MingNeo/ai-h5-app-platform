@@ -1,4 +1,4 @@
-import { type AppManifest, type CollectionDef, type DataEnv, aclRules, assertSafeDocument, DslError, fieldsToJsonSchema, normalizeQuery, SYSTEM_FIELDS } from '@app-platform/shared'
+import { type AclRules, type AppManifest, type CollectionDef, type DataEnv, aclRules, assertSafeDocument, DslError, fieldsToJsonSchema, normalizeQuery, SYSTEM_FIELDS } from '@app-platform/shared'
 import Ajv, { type ValidateFunction } from 'ajv'
 import type { Document, Filter } from 'mongodb'
 import { config } from '../../config'
@@ -15,6 +15,9 @@ export interface DataCtx {
   env: DataEnv
   manifest: AppManifest | null
   user: AppUser | null
+  /** 访客标识（app_vid cookie），未登录时作为数据归属与限流依据 */
+  vid?: string
+  ip: string
 }
 
 const ajv = new Ajv({ allErrors: true, strict: false })
@@ -90,18 +93,22 @@ async function checkIndexed(ctx: DataCtx, name: string, def: CollectionDef, fiel
   await pushDevError(ctx.appId, { kind: 'data-warning', message: msg })
 }
 
-function requireUser(ctx: DataCtx) {
-  if (!ctx.user)
-    throw err.login()
-  return ctx.user
+/** 数据归属：登录用户用 uid，游客用访客 cookie，兜底 IP */
+function actorOf(ctx: DataCtx) {
+  if (ctx.user)
+    return ctx.user.uid
+  return ctx.vid ? `vid:${ctx.vid}` : `ip:${ctx.ip}`
 }
 
 function readFilter(ctx: DataCtx, def: CollectionDef, mine: boolean): Filter<Document> {
   const rules = aclRules(def.acl)
   if (rules.read === 'none')
     throw err.forbidden('该集合仅后台可见')
-  if (rules.read === 'own' || mine)
-    return { _owner: requireUser(ctx).uid }
+  if (rules.read === 'own' || mine) {
+    if (!ctx.user && !rules.guestCreate)
+      throw err.login()
+    return { _owner: actorOf(ctx) }
+  }
   if (!ctx.user && !rules.guestRead)
     throw err.login()
   return {}
@@ -203,15 +210,17 @@ async function writeLimit(ctx: DataCtx, name: string, def: CollectionDef, uid: s
 export async function createDoc(ctx: DataCtx, name: string, data: unknown) {
   const def = collectionDef(ctx, name)
   const rules = aclRules(def.acl)
-  const user = requireUser(ctx)
   if (!rules.create)
     throw err.forbidden('该集合不允许应用端写入')
+  if (!ctx.user && !rules.guestCreate)
+    throw err.login()
+  const actor = actorOf(ctx)
   await validateData(ctx, def, data)
-  await writeLimit(ctx, name, def, user.uid)
+  await writeLimit(ctx, name, def, actor)
   await ensureIndexes(ctx.appId, ctx.env, name, def)
   const c = appCollection(ctx.appId, ctx.env, name)
   if (def.limits.perUserDocs) {
-    const n = await c.countDocuments({ _owner: user.uid }, { limit: def.limits.perUserDocs })
+    const n = await c.countDocuments({ _owner: actor }, { limit: def.limits.perUserDocs })
     if (n >= def.limits.perUserDocs)
       throw err.quota(`每人最多 ${def.limits.perUserDocs} 条`)
   }
@@ -219,8 +228,8 @@ export async function createDoc(ctx: DataCtx, name: string, data: unknown) {
   const doc = {
     ...(data as object),
     _id: newId(),
-    _owner: user.uid,
-    _ownerProfile: { nickname: user.nickname, avatar: user.avatar },
+    _owner: actor,
+    _ownerProfile: ctx.user ? { nickname: ctx.user.nickname, avatar: ctx.user.avatar } : { nickname: '游客', avatar: '' },
     _createdAt: now,
     _updatedAt: now,
   }
@@ -244,21 +253,24 @@ export async function getDoc(ctx: DataCtx, name: string, id: string) {
   return toDoc(doc)
 }
 
-async function ownDoc(ctx: DataCtx, name: string, id: string) {
-  const user = requireUser(ctx)
+async function ownDoc(ctx: DataCtx, name: string, id: string, rules: AclRules) {
+  if (!ctx.user && !rules.guestCreate)
+    throw err.login()
+  const actor = actorOf(ctx)
   const doc = await appCollection(ctx.appId, ctx.env, name).findOne({ _id: id } as any)
   if (!doc)
     throw err.notFound('数据不存在')
-  if (doc._owner !== user.uid)
+  if (doc._owner !== actor)
     throw err.forbidden('只能修改自己创建的数据')
-  return { doc, user }
+  return { doc, actor }
 }
 
 export async function updateDoc(ctx: DataCtx, name: string, id: string, patch: unknown) {
   const def = collectionDef(ctx, name)
-  if (!aclRules(def.acl).update)
+  const rules = aclRules(def.acl)
+  if (!rules.update)
     throw err.forbidden('该集合的数据创建后不能修改')
-  const { doc, user } = await ownDoc(ctx, name, id)
+  const { doc, actor } = await ownDoc(ctx, name, id, rules)
   if (!patch || typeof patch !== 'object' || Array.isArray(patch))
     throw err.invalid('data 必须是对象')
   const merged: Record<string, unknown> = {}
@@ -272,13 +284,13 @@ export async function updateDoc(ctx: DataCtx, name: string, id: string, patch: u
       delete merged[k]
   }
   await validateData(ctx, def, merged)
-  await writeLimit(ctx, name, def, user.uid)
+  await writeLimit(ctx, name, def, actor)
   const now = Date.now()
   const unset = Object.fromEntries(Object.entries(patch as object).filter(([, v]) => v === null || v === undefined).map(([k]) => [k, '']))
   const set = Object.fromEntries(Object.entries(patch as object).filter(([, v]) => v !== null && v !== undefined))
   try {
     await appCollection(ctx.appId, ctx.env, name).updateOne(
-      { _id: id, _owner: user.uid } as any,
+      { _id: id, _owner: actor } as any,
       { $set: { ...set, _updatedAt: now }, ...(Object.keys(unset).length ? { $unset: unset } : {}) } as any,
     )
   }
@@ -292,10 +304,11 @@ export async function updateDoc(ctx: DataCtx, name: string, id: string, patch: u
 
 export async function removeDoc(ctx: DataCtx, name: string, id: string) {
   const def = collectionDef(ctx, name)
-  if (!aclRules(def.acl).remove)
+  const rules = aclRules(def.acl)
+  if (!rules.remove)
     throw err.forbidden('该集合的数据创建后不能删除')
-  const { user } = await ownDoc(ctx, name, id)
-  await writeLimit(ctx, name, def, user.uid)
-  await appCollection(ctx.appId, ctx.env, name).deleteOne({ _id: id, _owner: user.uid } as any)
+  const { actor } = await ownDoc(ctx, name, id, rules)
+  await writeLimit(ctx, name, def, actor)
+  await appCollection(ctx.appId, ctx.env, name).deleteOne({ _id: id, _owner: actor } as any)
   return { ok: true }
 }

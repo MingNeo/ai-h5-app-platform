@@ -1,7 +1,16 @@
 # 平台 SDK（全局对象 `platform`，由 /__platform/boot.js 注入，无需 import）
 
+`platform` 是应用和平台之间唯一的通道：登录、数据、KV、上传、业务接口、埋点都在这里。平台会自动注入每个页面，不要自己引用 `/__platform/boot.js`。
+
+## 身份与登录
+
+- 页面默认对游客开放；manifest 的 `requireLogin: true` 才会在启动时强制登录
+- 未登录时，调用需要身份的数据操作会返回 401，SDK 自动拉起一次登录并在成功后重放请求，不需要每个请求手动判断
+- `public_submit` / `public_write` 集合允许游客写：`_owner` 是设备标识 `vid:<app_vid>`，`mine()` 按设备查自己的数据
+- 游客身份是弱身份：清 cookie、换设备就是新身份；需要可靠身份时用登录用户（`submit_only` / `private` / `public_read`）
+
 ```js
-// 初始化（含自动登录检查）。需要立刻知道登录状态的地方先 await
+// 初始化（含一次登录状态检查）。需要立刻知道登录状态的地方先 await
 await platform.ready()
 
 // ---------- 登录 ----------
@@ -12,8 +21,9 @@ const off = platform.auth.onChange(user => { /* 登录状态变化 */ })
 await platform.auth.logout()
 
 // ---------- 数据库（集合需先在 manifest.json 声明） ----------
+// 未声明的集合/字段会报 NOT_FOUND；权限、字段校验、索引、限流都由网关按 manifest 执行。
 const votes = platform.db.collection('votes')
-const doc = await votes.add({ option: 'a' })          // 需要登录；返回带系统字段的文档
+const doc = await votes.add({ option: 'a' })          // 能否游客写入由集合 ACL 决定；返回带系统字段的文档
 const { list, hasMore } = await votes
   .where({ option: 'a', score: { $gte: 60 } })         // 操作符：$eq $ne $gt $gte $lt $lte $in $nin $exists，支持 $and/$or
   .orderBy('score', 'desc')                            // 排序字段必须在 manifest 的 indexes 中声明
@@ -21,13 +31,14 @@ const { list, hasMore } = await votes
   .get()
 const n = await votes.where({ option: 'a' }).count()
 const groups = await votes.groupCount('option')       // [{ value: 'a', count: 12 }, ...]
-const mine = await votes.mine().get()                  // 只查自己创建的（需要登录）
+const mine = await votes.mine().get()                  // 只查自己创建的；游客按设备（public_submit / public_write）
 const one = await votes.doc(id).get()                  // 不存在返回 null
 await votes.doc(id).update({ option: 'b' })            // 只能改自己创建的
 await votes.doc(id).remove()
 
 // 每条文档都有系统字段：
-// _id: string, _owner: string（创建者 uid）, _ownerProfile: { nickname, avatar }, _createdAt / _updatedAt: 毫秒时间戳
+// _id: string, _owner: string（登录用户是 uid，游客是 vid:<设备标识>）,
+// _ownerProfile: { nickname, avatar }, _createdAt / _updatedAt: 毫秒时间戳
 
 // ---------- 键值存储 ----------
 await platform.kv.user.set('save', { level: 3 })      // 当前用户私有（需要登录），适合游戏存档、偏好设置
@@ -76,8 +87,13 @@ catch (e) {
 ```
 
 ## 常见模式
+
+下面只是数据建模的常见组合，不是活动形态清单。打卡、签到、接龙、预约、征集、摊主申请、抽签分组等，都是按同样的集合 + 唯一索引思路自己组合出来的。
+
 - 一人一票 / 一人一次报名：集合加唯一索引 `{ "fields": { "_owner": 1 }, "unique": true }`；按选项各一票：`{ "fields": { "_owner": 1, "itemId": 1 }, "unique": true }`。
 - 点赞：单独建 `likes` 集合（唯一索引 `_owner + postId`），用 `where({ postId }).count()` 统计。
-- 排行榜：`public_read` 集合存成绩，`orderBy('score', 'desc').limit(50)`，score 必须声明索引；每人只保留最好成绩时，先 `mine()` 查到自己的记录再 `update`。
-- 报名/问卷：`submit_only` 集合，用户提交后只能看到自己的，运营在后台导出。
+- 排行榜：`public_read` 集合存成绩，`orderBy('score', 'desc').limit(50)`，score 必须声明索引；每人只保留最好成绩时，先 `mine()` 查到自己的记录再 `update`。游客也能参与就用 `public_write`。
+- 报名/问卷：`submit_only` 集合，用户提交后只能看到自己的，运营在后台导出。活动页要求不登录也能提交时用 `public_submit`（游客按设备归属，同样能读自己的）；还要展示所有人内容（留言墙、晒图、排行榜、公开投票）就用 `public_write`。
+- 每日打卡/签到：`private` 或 `submit_only` 集合，唯一索引 `_owner + day`（`day` 存 `YYYY-MM-DD`），用 `where({ _owner })` 查自己的记录算连续天数。不登录的签到用 `public_submit`（按设备区分）。
+- 接龙/名额：`public_read`（或游客参与用 `public_write`）集合存参与记录，另建 `readonly` 集合存名额和截止时间；提交前用 `count()` 判断是否满员。
 - 活动配置（标题、时间、奖项说明）：`readonly` 集合或 `platform.kv.app`，由运营在后台维护。
