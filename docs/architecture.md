@@ -123,7 +123,9 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 - 后台与应用**同源**，因此**不使用 cookie 会话**。飞书回调签发 60 秒一次性票据，302 到 `/admin#t=...`；SPA 用 `POST /admin-api/auth/exchange` 换 Bearer token，只存内存（刷新后静默重登）。
 - `/admin-api/*` 只认 `Authorization: Bearer`，没有 cookie 回退；非 GET 仍校验 `Origin`；OPTIONS 直接 403；不开放 CORS。
 - `/admin` 文档返回 `Cross-Origin-Opener-Policy: same-origin`、`X-Frame-Options: DENY`、`frame-ancestors 'none'`，阻止应用页面通过 popup / iframe 拿到 token。细节见 [security-boundary.md](security-boundary.md)。
-- 角色：平台管理员、应用 `owner` / `developer` / `viewer`。平台管理员对所有应用等价于 owner。
+- 角色：平台管理员、应用 `owner` / `developer` / `publisher` / `data` / `operator` / `viewer`。平台管理员对所有应用等价于 owner。
+- 鉴权按权限位（`APP_PERMS`，[permissions.ts](../packages/shared/src/permissions.ts)）判断，角色只是预置权限包：`owner` 全量、`developer` 开发与测试数据、`publisher` 发布回滚、`data` 数据读写导出、`operator` 只看后台视图与监控、`viewer` 还可读任意集合。成员文档的 `perms` 可覆盖角色包。
+- 读数据时，只有 `console.view` 的人只能读 `admin.json` 引用的集合，`data.read` 才能读任意已声明集合。
 
 ### 应用端
 
@@ -285,7 +287,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 
 ### 发布与回滚
 
-- 只有应用 `owner` 能发布。
+- 发布与回滚需要 `app.publish` 权限（`owner` 和 `publisher` 默认拥有）。
 - `compareManifest()` 对比线上 build 的 manifest：删除集合、删除字段、放宽 ACL、取消强制登录等会生成确认项；未审批的能力/业务接口给警告。
 - 存在确认项时必须显式 `confirmed=true`。
 - 发布：按新 manifest 在 prod 库补索引 → 写 `releases` → 切换 `apps.prodBuildId` / `prodReleaseId` → 清应用缓存 →（配置了 `CDN_PURGE_URL` 时）刷新 CDN。
@@ -323,7 +325,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 
 ## 10. 配置
 
-配置来源是环境变量和仓库根目录 `.env.local`（不覆盖已有环境变量）。完整列表见 `.env.example`，常用项：
+配置来源是环境变量和仓库根目录 `.env.local`（不覆盖已有环境变量）。完整列表见 `.env.example`，线上部署步骤见 [deploy/README.md](../deploy/README.md)，常用项：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
@@ -369,7 +371,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 5. 后台只认 `Authorization: Bearer`，不使用 cookie；`/admin` 必须带 COOP、`X-Frame-Options: DENY`、`frame-ancestors 'none'`。
 6. 数据访问由服务端强制 ACL 和 owner 条件，DSL 只允许白名单操作符，文档键禁止 `$` 和 `.`。
 7. 业务接口只允许已审批前缀，上游地址只由平台管理员配置，客户端无法指定。
-8. 发布切换只由 owner 操作；放宽权限、删除集合/字段必须显式确认。
+8. 发布切换只由拥有 `app.publish` 的人操作；放宽权限、删除集合/字段必须显式确认。
 
 ## 12. 与设计文档的已知差异
 

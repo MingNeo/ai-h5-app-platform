@@ -1,3 +1,4 @@
+import type { AppPerm, AppRole } from '@app-platform/shared'
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '../api'
@@ -11,7 +12,8 @@ export interface AppDetail {
   schedule: { startAt?: string | null, endAt?: string | null } | null
   betaBuildId: string | null
   prodBuildId: string | null
-  role: 'owner' | 'developer' | 'viewer'
+  role: AppRole
+  perms: AppPerm[]
   urls: { prod: string, beta: string, dev: string }
   manifest: any
   manifestErrors: string[]
@@ -33,9 +35,17 @@ export const useAppStore = defineStore('app', () => {
     return app.value
   }
 
-  function canEdit() {
-    return app.value?.role === 'owner' || app.value?.role === 'developer'
+  function can(...perms: AppPerm[]) {
+    const owned = new Set(app.value?.perms ?? [])
+    return perms.every(p => owned.has(p))
   }
 
-  return { app, pendingAttachments, filesVersion, previewVersion, load, canEdit }
+  function canAny(...perms: AppPerm[]) {
+    const owned = new Set(app.value?.perms ?? [])
+    return perms.some(p => owned.has(p))
+  }
+
+  const canEdit = () => can('app.edit')
+
+  return { app, pendingAttachments, filesVersion, previewVersion, load, can, canAny, canEdit }
 })

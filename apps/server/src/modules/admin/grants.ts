@@ -8,7 +8,7 @@ import { ok, parseBody } from '../../lib/http'
 import { col } from '../../lib/mongo'
 import { newId } from '../../lib/tokens'
 import { notifyFeishu } from '../build/notify'
-import { requireAdmin, requireAppRole, requirePlatformAdmin } from './auth'
+import { requireAdmin, requirePerm, requirePlatformAdmin } from './auth'
 
 export function registerGrantRoutes(app: FastifyInstance) {
   app.get('/admin-api/catalog', async (req) => {
@@ -29,7 +29,7 @@ export function registerGrantRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/grants', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const body = parseBody(z.object({ type: z.enum(['capability', 'biz']), key: z.string().min(1).max(200), reason: z.string().trim().min(2).max(500) }), req.body)
     if (body.type === 'capability' && !CAPABILITIES.includes(body.key))
       throw err.invalid('未知能力')
@@ -158,7 +158,7 @@ export function registerGrantRoutes(app: FastifyInstance) {
   app.get('/admin-api/audit', async (req) => {
     const q = req.query as { appId?: string }
     if (q.appId)
-      await requireAppRole(req, q.appId, 'viewer')
+      await requirePerm(req, q.appId, 'console.view')
     else requirePlatformAdmin(req)
     const list = await col.audit.find(q.appId ? { appId: q.appId } : {}).sort({ createdAt: -1 }).limit(200).toArray()
     const users = await col.adminUsers.find({ _id: { $in: [...new Set(list.map(a => a.actor))] } }, { projection: { name: 1 } }).toArray()

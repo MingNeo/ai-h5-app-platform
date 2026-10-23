@@ -8,7 +8,7 @@ import { useAppStore } from '../../stores/app'
 const store = useAppStore()
 const router = useRouter()
 const app = store.app!
-const isOwner = computed(() => store.app?.role === 'owner')
+const canManage = computed(() => store.can('app.manage'))
 const form = reactive({
   name: app.name,
   description: app.description,
@@ -121,8 +121,8 @@ async function remove() {
         设置后，时间范围外访问线上版会显示「活动未开始 / 已结束」。
       </div>
       <div class="flex gap-2">
-        <el-date-picker v-model="form.range" type="datetimerange" start-placeholder="开始（不限）" end-placeholder="结束（不限）" :disabled="!isOwner" />
-        <el-button :disabled="!isOwner" @click="saveSchedule">
+        <el-date-picker v-model="form.range" type="datetimerange" start-placeholder="开始（不限）" end-placeholder="结束（不限）" :disabled="!canManage" />
+        <el-button :disabled="!canManage" @click="saveSchedule">
           保存
         </el-button>
       </div>
@@ -132,10 +132,10 @@ async function remove() {
         危险操作
       </div>
       <div class="flex gap-2">
-        <el-button :type="store.app?.status === 'offline' ? 'success' : 'warning'" plain :disabled="!isOwner" @click="toggleStatus">
+        <el-button :type="store.app?.status === 'offline' ? 'success' : 'warning'" plain :disabled="!canManage" @click="toggleStatus">
           {{ store.app?.status === 'offline' ? '重新上线' : '下线应用' }}
         </el-button>
-        <el-button type="danger" plain :disabled="!isOwner" @click="remove">
+        <el-button type="danger" plain :disabled="!canManage" @click="remove">
           删除应用
         </el-button>
       </div>
