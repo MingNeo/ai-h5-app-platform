@@ -1,4 +1,4 @@
-import { ACL_OPENNESS, type AppManifest, type CheckIssue } from '@app-platform/shared'
+import { ACL_OPENNESS, type AppManifest, type CheckIssue, appUrl } from '@app-platform/shared'
 import { config } from '../../config'
 import { approvedGrants, invalidateApp } from '../../core/apps'
 import { bizCheckInput } from '../../core/biz-docs'
@@ -193,5 +193,5 @@ async function purgeCdn(appId: string) {
   const url = process.env.CDN_PURGE_URL
   if (!url)
     return
-  await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls: [`https://${appId}.${config.baseDomain}/`, `https://${appId}.${config.baseDomain}/index.html`] }) }).catch(e => console.warn('[cdn] 刷新失败', e))
+  await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ urls: [appUrl(appId, 'prod', config.baseDomain), `${appUrl(appId, 'prod', config.baseDomain)}index.html`] }) }).catch(e => console.warn('[cdn] 刷新失败', e))
 }

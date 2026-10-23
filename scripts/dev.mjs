@@ -163,7 +163,6 @@ function spawnChild(name, command, args) {
 async function main() {
   const checks = [
     ['HTTPS proxy', proxyPort, tcpPortFree(proxyPort), `lsof -nP -iTCP:${proxyPort} -sTCP:LISTEN`],
-    ['本地 DNS', dnsPort, udpPortFree(dnsPort), `lsof -nP -iUDP:${dnsPort}`],
   ]
   for (const [name, port, pending, hint] of checks) {
     if (!(await pending)) {
@@ -172,8 +171,7 @@ async function main() {
     }
   }
 
-  console.log(`[dev] 基础域名 ${domain}`)
-  spawnChild('dns', 'node', [join(REPO_ROOT, 'scripts/dev-dns.mjs')])
+  console.log(`[dev] 域名 ${domain}`)
   spawnChild('proxy', 'node', [join(REPO_ROOT, 'scripts/dev-proxy.mjs')])
   spawnChild('server+admin', 'pnpm', [
     '-r',
@@ -185,11 +183,11 @@ async function main() {
     'dev',
   ])
 
-  const adminUrl = `https://admin.${domain}/`
+  const adminUrl = `https://${domain}/admin/`
   console.log(`[dev] 后台：${adminUrl}`)
-  console.log(`[dev] 应用：https://<appId>.${domain}/`)
-  console.log(`[dev] 预览：https://<appId>--dev.${domain}/`)
-  console.log(`[dev] demo：https://demo.${domain}/（未生成时先 make seed）`)
+  console.log(`[dev] 应用：https://${domain}/a/<appId>/`)
+  console.log(`[dev] 预览：https://${domain}/a/<appId>--dev/`)
+  console.log(`[dev] demo：https://${domain}/a/demo/（未生成时先 make seed）`)
   console.log('[dev] Ctrl-C 停止全部进程')
 
   if (!/^(1|true|yes|on)$/i.test(process.env.DEV_NO_OPEN || '')) {

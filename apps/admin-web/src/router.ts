@@ -3,7 +3,8 @@ import { setUnauthorizedHandler } from './api'
 import { useUserStore } from './stores/user'
 
 export const router = createRouter({
-  history: createWebHistory(),
+  // 后台挂在同一个域名下的 /admin，构建时 base 为 /admin/
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/login', component: () => import('./pages/Login.vue'), meta: { public: true } },
     {

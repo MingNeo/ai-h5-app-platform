@@ -58,10 +58,16 @@ const channelAvailable = computed(() => ({
   prod: Boolean(store.app?.prodBuildId),
 }))
 
+/** 应用内路径：预览页上报的是 /a/{appId}[--channel]/...，先去掉前缀再交给后端 */
+function appRelative(path: string) {
+  const m = /^\/a\/[^/]+(\/.*)?$/.exec(path)
+  return m ? (m[1] || '/') : path
+}
+
 async function load(path = '/') {
   loading.value = true
   try {
-    const res = await api<{ url: string }>(`/apps/${props.appId}/preview-url`, { body: { channel: channel.value, identity: identity.value, path } })
+    const res = await api<{ url: string }>(`/apps/${props.appId}/preview-url`, { body: { channel: channel.value, identity: identity.value, path: appRelative(path) } })
     url.value = res.url
     frameKey.value++
   }
@@ -79,7 +85,7 @@ function openNew() {
 }
 
 async function makeQr() {
-  const res = await api<{ url: string }>(`/apps/${props.appId}/preview-url`, { body: { channel: channel.value, identity: 'self', path: currentPath.value, qr: true } })
+  const res = await api<{ url: string }>(`/apps/${props.appId}/preview-url`, { body: { channel: channel.value, identity: 'self', path: appRelative(currentPath.value), qr: true } })
   qrUrl.value = res.url
   qr.value = await QRCode.toDataURL(res.url, { width: 220, margin: 1 })
 }

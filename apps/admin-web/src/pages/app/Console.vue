@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
-import { api } from '../../api'
+import { api, download } from '../../api'
 import { useAppStore } from '../../stores/app'
 
 interface Filter { field: string, type?: 'select' | 'input' | 'date', label?: string, options?: Array<string | number>, placeholder?: string }
@@ -314,7 +314,7 @@ async function removeRow(block: Block, row: any) {
 }
 
 function exportCsv(collection: string) {
-  window.open(`/admin-api/apps/${appId}/data/${env.value}/${collection}/export`, '_blank')
+  void download(`/apps/${appId}/data/${env.value}/${collection}/export`)
 }
 
 function openEditor() {

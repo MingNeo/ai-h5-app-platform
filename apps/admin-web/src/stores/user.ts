@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { api } from '../api'
+import { api, clearToken } from '../api'
 
 export interface Me {
   id: string
@@ -26,8 +26,15 @@ export const useUserStore = defineStore('user', () => {
   }
 
   async function logout() {
-    await api('/auth/logout', { method: 'POST', body: {} })
-    me.value = null
+    try {
+      await api('/auth/logout', { method: 'POST', body: {} })
+    }
+    finally {
+      clearToken()
+      me.value = null
+      // 主动登出后不要立刻被登录页的静默 SSO 再登回来
+      sessionStorage.setItem('adm_login_tried', '1')
+    }
   }
 
   return { me, loaded, load, logout }

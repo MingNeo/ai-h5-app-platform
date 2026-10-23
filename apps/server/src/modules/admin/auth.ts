@@ -1,24 +1,38 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
+import { z } from 'zod'
 import { config } from '../../config'
 import { audit } from '../../lib/audit'
 import { err } from '../../lib/errors'
-import { ok } from '../../lib/http'
+import { ok, parseBody } from '../../lib/http'
 import { type AdminUserDoc, type AppRole, col } from '../../lib/mongo'
 import { store } from '../../lib/store'
 import { newId, randomToken, signToken, verifyToken } from '../../lib/tokens'
 
-export const ADMIN_COOKIE = '__Host-app_admin'
 const SESSION_TTL = 7 * 86400
+const TICKET_TTL = 60
 const ROLE_RANK: Record<AppRole, number> = { viewer: 1, developer: 2, owner: 3 }
 
-async function createSession(reply: FastifyReply, userId: string) {
+/**
+ * 后台与应用同源，**不能使用 cookie 会话**：应用页面发起的同源请求会自动带上后台 cookie，
+ * `Origin` 与 `X-App-Admin` 都能伪造，等于任何应用都能冒充管理员。
+ * 因此会话 token 通过 URL fragment 一次性下发、前端只存内存、
+ * 请求时用 Authorization 头携带。详见 docs/security-boundary.md。
+ */
+function bearerToken(req: FastifyRequest): string | undefined {
+  const raw = req.headers.authorization
+  if (raw?.startsWith('Bearer '))
+    return raw.slice(7).trim() || undefined
+  return undefined
+}
+
+async function createSession(userId: string) {
   const token = randomToken()
   await store.set(`adm:sess:${token}`, userId, SESSION_TTL)
-  reply.setCookie(ADMIN_COOKIE, token, { path: '/', httpOnly: true, secure: true, sameSite: 'strict', maxAge: SESSION_TTL })
+  return token
 }
 
 async function loadAdmin(req: FastifyRequest): Promise<AdminUserDoc | null> {
-  const token = (req.cookies as Record<string, string | undefined>)[ADMIN_COOKIE]
+  const token = bearerToken(req)
   if (!token)
     return null
   const uid = await store.get(`adm:sess:${token}`)
@@ -59,6 +73,10 @@ export async function requireAppRole(req: FastifyRequest, appId: string, min: Ap
   return { user, app, role }
 }
 
+function meView(u: AdminUserDoc) {
+  return { id: u._id, name: u.name, avatar: u.avatar, email: u.email, isPlatformAdmin: u.isPlatformAdmin }
+}
+
 async function upsertUser(info: { openId: string, name: string, avatar: string, email: string }) {
   const isListed = config.admin.platformAdmins.some(a => a === info.email || a === info.openId)
   const first = (await col.adminUsers.estimatedDocumentCount()) === 0
@@ -75,24 +93,51 @@ async function upsertUser(info: { openId: string, name: string, avatar: string, 
   return id
 }
 
+/** 后台请求的 Origin：生产只认入口域名；本地免登时额外放行 localhost / 127.0.0.1 */
+function originAllowed(origin: string) {
+  if (origin === config.adminOrigin)
+    return true
+  if (!config.devHosts.length)
+    return false
+  try {
+    const u = new URL(origin)
+    return (u.protocol === 'http:' || u.protocol === 'https:') && config.devHosts.includes(u.hostname.toLowerCase())
+  }
+  catch {
+    return false
+  }
+}
+
+/** 前端路由路径（不含 /admin 前缀），只允许站内路径 */
 function safeRedirect(r: unknown) {
-  return typeof r === 'string' && r.startsWith('/') && !r.startsWith('//') ? r : '/'
+  if (typeof r !== 'string' || !r.startsWith('/') || r.startsWith('//'))
+    return '/'
+  const path = r.startsWith('/admin/') ? r.slice('/admin'.length) : r
+  if (path.startsWith('/admin-api') || path === '/admin')
+    return '/'
+  return path
+}
+
+/** 一次性登录票据：放 URL fragment，很短的有效期，交换后立即作废 */
+async function issueLoginTicket(userId: string) {
+  const jti = newId()
+  const ticket = signToken({ kind: 'adm-ticket', uid: userId, jti }, TICKET_TTL)
+  await store.set(`adm:tkt:${jti}`, userId, TICKET_TTL + 60)
+  return ticket
 }
 
 export function registerAdminAuth(app: FastifyInstance) {
-  // 后台会话 + CSRF：所有非 GET 请求必须带自定义头（跨源请求会因此触发预检，而后台不开放 CORS）
+  // 后台接口：Bearer 鉴权；非 GET 仍校验 Origin（无 cookie，天然免疫 CSRF）
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/admin-api/'))
       return
     if (req.site?.kind !== 'admin')
-      throw err.notFound()
+      throw err.notFound('后台接口需要通过平台入口域名访问')
     if (req.method === 'OPTIONS')
       return reply.status(403).send()
     if (req.method !== 'GET' && req.method !== 'HEAD') {
-      if (req.headers['x-app-admin'] !== '1')
-        throw err.forbidden('缺少后台请求头')
       const origin = req.headers.origin
-      if (origin && origin !== config.adminOrigin)
+      if (origin && !originAllowed(origin))
         throw err.forbidden('非法来源')
     }
     req.admin = (await loadAdmin(req)) ?? undefined
@@ -108,27 +153,44 @@ export function registerAdminAuth(app: FastifyInstance) {
 
   app.get('/admin-api/auth/me', async (req) => {
     const u = requireAdmin(req)
-    return ok({ id: u._id, name: u.name, avatar: u.avatar, email: u.email, isPlatformAdmin: u.isPlatformAdmin })
+    return ok(meView(u))
   })
 
-  app.post('/admin-api/auth/logout', async (req, reply) => {
-    const token = (req.cookies as Record<string, string | undefined>)[ADMIN_COOKIE]
+  app.post('/admin-api/auth/logout', async (req) => {
+    const token = bearerToken(req)
     if (token)
       await store.del(`adm:sess:${token}`)
-    reply.clearCookie(ADMIN_COOKIE, { path: '/' })
     return ok({})
   })
 
-  app.post('/admin-api/auth/dev-login', async (req, reply) => {
+  app.post('/admin-api/auth/dev-login', async (req) => {
     if (!config.admin.devBypass)
       throw err.forbidden('未开启本地免登（DEV_ADMIN_BYPASS）')
     const name = String((req.body as { name?: string })?.name || '本地开发者').slice(0, 20)
     const openId = `dev:${name}`
     const id = await upsertUser({ openId, name, avatar: '', email: '' })
     await col.adminUsers.updateOne({ _id: id }, { $set: { isPlatformAdmin: true } })
-    await createSession(reply, id)
+    const token = await createSession(id)
     audit(id, 'admin.login', undefined, { via: 'dev' })
-    return ok({})
+    const user = await col.adminUsers.findOne({ _id: id })
+    return ok({ token, user: user ? meView(user) : null })
+  })
+
+  // 票据换会话：票据一次性，交换后删除
+  app.post('/admin-api/auth/exchange', async (req) => {
+    const { ticket } = parseBody(z.object({ ticket: z.string().min(1).max(4096) }), req.body)
+    const claims = verifyToken<{ kind: string, uid: string, jti: string }>(ticket)
+    if (!claims || claims.kind !== 'adm-ticket')
+      throw err.forbidden('登录票据无效或已过期')
+    const uid = await store.get(`adm:tkt:${claims.jti}`)
+    if (!uid || uid !== claims.uid)
+      throw err.forbidden('登录票据无效或已过期')
+    await store.del(`adm:tkt:${claims.jti}`)
+    const user = await col.adminUsers.findOne({ _id: uid })
+    if (!user)
+      throw err.forbidden('用户不存在')
+    const token = await createSession(uid)
+    return ok({ token, user: meView(user) })
   })
 
   app.get('/admin-api/auth/feishu/login', async (req, reply) => {
@@ -166,8 +228,10 @@ export function registerAdminAuth(app: FastifyInstance) {
       avatar: info.data.avatar_url ?? '',
       email: info.data.enterprise_email || info.data.email || '',
     })
-    await createSession(reply, id)
     audit(id, 'admin.login', undefined, { via: 'feishu' })
-    return reply.redirect(state.redirect)
+    // fragment 不会发给服务端，也不会出现在 Referer；前端兑换后立即清掉
+    const ticket = await issueLoginTicket(id)
+    const next = safeRedirect(state.redirect)
+    return reply.redirect(`${config.adminOrigin}/admin#t=${encodeURIComponent(ticket)}&next=${encodeURIComponent(next)}`)
   })
 }
