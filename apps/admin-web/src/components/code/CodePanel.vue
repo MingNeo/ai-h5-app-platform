@@ -57,9 +57,9 @@ const tree = computed<TreeNode[]>(() => {
 })
 
 async function loadFiles() {
-  const res = await api<{ files: FileItem[], locked: Array<{ path: string }> }>(`/apps/${props.appId}/files`, { quiet: true })
-  files.value = res.files
-  locked.value = res.locked
+  const res = await api<{ files: FileItem[], locked?: Array<{ path: string }> }>(`/apps/${props.appId}/files`, { quiet: true })
+  files.value = res.files ?? []
+  locked.value = res.locked ?? []
   if (current.value && !isLocked.value) {
     const f = res.files.find(x => x.path === current.value)
     if (!f) {

@@ -1,4 +1,5 @@
 // 初始化本地演示数据：开发者账号 + demo 投票应用（生成测试版并上线）
+import { appUrl } from '@app-platform/shared'
 import { config } from '../config'
 import { initDraft, writeDraft } from '../core/drafts'
 import { MANIFEST, VOTE_PAGE } from '../lib/llm-mock'
@@ -33,7 +34,7 @@ async function main() {
     }
     if (done?.status === 'success') {
       await release(APP_ID, build._id, user._id, '初始化演示数据', 'release')
-      console.log(`已上线：https://${APP_ID}.${config.baseDomain}/`)
+      console.log(`已上线：${appUrl(APP_ID, 'prod', config.baseDomain)}`)
     }
     else {
       console.error('构建失败', done?.issues)
@@ -87,7 +88,7 @@ async function main() {
     }
     else {
       await release(APP_ID, build._id, user._id, '初始化演示数据', 'release')
-      console.log(`已上线：https://${APP_ID}.${config.baseDomain}/`)
+      console.log(`已上线：${appUrl(APP_ID, 'prod', config.baseDomain)}`)
     }
   }
   await new Promise(r => setTimeout(r, 500))

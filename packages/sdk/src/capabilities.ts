@@ -34,6 +34,8 @@ export const biz = {
           credentials: 'same-origin',
           headers: {
             'X-App-SDK': '1',
+            'X-App-Id': config.appId,
+            'X-App-Channel': config.channel,
             ...(method === 'GET' ? {} : { 'Content-Type': 'application/json' }),
             ...options.headers,
           },

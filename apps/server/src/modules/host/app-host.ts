@@ -1,5 +1,5 @@
 import { BOOT_SCRIPT, TAILWIND_SCRIPT } from '@app-platform/app-template'
-import { ADMIN_VIEW_FILE } from '@app-platform/shared'
+import { ADMIN_VIEW_FILE, appPath } from '@app-platform/shared'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { getApp, isWithinSchedule } from '../../core/apps'
 import { currentFiles } from '../../core/drafts'
@@ -11,22 +11,28 @@ import { buildCsp, SECURITY_HEADERS } from './csp'
 import { placeholderPage } from './pages'
 
 const buildFileCache = new Map<string, Map<string, SnapshotFile>>()
+const rewriteCache = new Map<string, Buffer>()
 
 /** 平台自己的 head 标签；应用源码里不用写，由这里统一注入 */
-const PLATFORM_HEAD = [
-  `<script src="${BOOT_SCRIPT}"></script>`,
-  `<link rel="stylesheet" href="/__platform/ui.css">`,
-  `<script src="${TAILWIND_SCRIPT}"></script>`,
-]
+function platformHead(appId: string, channel: 'prod' | 'beta' | 'dev') {
+  const qs = `?app=${encodeURIComponent(appId)}&amp;channel=${encodeURIComponent(channel)}`
+  return [
+    `<script src="${BOOT_SCRIPT}${qs}"></script>`,
+    `<link rel="stylesheet" href="/__platform/ui.css">`,
+    `<script src="${TAILWIND_SCRIPT}"></script>`,
+  ]
+}
 
-function injectPlatformHead(html: string) {
-  const missing = PLATFORM_HEAD.filter((tag) => {
-    const url = /(?:src|href)="([^"]+)"/.exec(tag)?.[1]
-    return url ? !html.includes(url) : true
-  })
-  if (!missing.length)
-    return html
-  return html.replace(/<head[^>]*>/i, m => `${m}\n    ${missing.join('\n    ')}`)
+function injectPlatformHead(html: string, appId: string, channel: 'prod' | 'beta' | 'dev') {
+  const qs = `?app=${encodeURIComponent(appId)}&amp;channel=${encodeURIComponent(channel)}`
+  if (html.includes('/__platform/boot.js')) {
+    // 应用自己引用了 boot.js：补上 appId / channel，避免拿到空配置
+    return html.includes('/__platform/boot.js?')
+      ? html
+      : html.replace('/__platform/boot.js', `${BOOT_SCRIPT}${qs}`)
+  }
+  const tags = platformHead(appId, channel).join('\n    ')
+  return html.replace(/<head[^>]*>/i, m => `${m}\n    ${tags}`)
 }
 
 async function buildFiles(buildId: string) {
@@ -54,13 +60,62 @@ export async function appPageHeaders(appId: string, channel: 'prod' | 'beta' | '
   }
 }
 
+const REWRITE_TEXT = /\.(?:html?|js|mjs|css|svg)$/i
+/** 应用内文件在根路径下的可访问路径集合，用于只改写真实存在的引用 */
+function appUrlPaths(files: Map<string, SnapshotFile>) {
+  const out = new Set<string>()
+  for (const p of files.keys()) {
+    out.add(`/${p}`)
+    if (p.startsWith('public/'))
+      out.add(`/${p.slice('public/'.length)}`)
+  }
+  return out
+}
+
+/**
+ * 应用从根路径迁到 /a/{appId}[--channel]/ 后，源码里的根绝对引用需要补前缀。
+ * 只改写能对应到应用文件的路径，避免误伤 platform.biz.request('/api/...') 这类业务路径。
+ */
+function rewriteAppUrls(text: string, base: string, urls: Set<string>) {
+  const replacePath = (raw: string) => {
+    if (!raw.startsWith('/') || raw.startsWith('//'))
+      return raw
+    const [, path, suffix = ''] = /^([^?#]*)(.*)$/.exec(raw)!
+    if (path === '/')
+      return `${base}${suffix}`
+    return urls.has(path!) ? `${base}${path!.slice(1)}${suffix}` : raw
+  }
+  return text
+    // 引号内的路径：HTML 属性、JS import、fetch 等
+    .replace(/(["'`])(\/[^"'`\n]*?)\1/g, (_m, q: string, p: string) => `${q}${replacePath(p)}${q}`)
+    // CSS url(/...)
+    .replace(/url\((\s*)(['"]?)(\/[^'")\s]*)\2(\s*)\)/g, (m, s1: string, q: string, p: string, s2: string) => {
+      const next = replacePath(p)
+      return next === p ? m : `url(${s1}${q}${next}${q}${s2})`
+    })
+}
+
+/** 改写结果按 buildId + 路径 + 前缀缓存；预览草稿没有 buildId，直接用内容 hash 作键 */
+function rewriteFile(data: Buffer, path: string, base: string, urls: Set<string>, cacheKey: string) {
+  const key = `${cacheKey}|${path}|${base}`
+  const hit = rewriteCache.get(key)
+  if (hit)
+    return hit
+  const out = Buffer.from(rewriteAppUrls(data.toString('utf8'), base, urls), 'utf8')
+  if (rewriteCache.size > 500)
+    rewriteCache.delete(rewriteCache.keys().next().value!)
+  rewriteCache.set(key, out)
+  return out
+}
+
 /** 按文件清单返回静态文件；dev 直接读草稿，beta/prod 读构建产物（内容相同） */
 async function serveFiles(req: FastifyRequest, reply: FastifyReply, files: Map<string, SnapshotFile>, channel: 'prod' | 'beta' | 'dev') {
   const site = req.site
   if (site?.kind !== 'app')
     return reply.status(404).send('Not Found')
   const { appId } = site
-  let path = decodeURIComponent((req.url.split('?')[0] ?? '/').replace(/^\/+/, ''))
+  const base = `${appPath(appId, channel)}/`
+  let path = decodeURIComponent(site.path).replace(/^\/+/, '')
   if (path === '' || path.endsWith('/'))
     path += 'index.html'
   // 后台视图配置只在管理端读取，不对应用访问者暴露
@@ -69,8 +124,8 @@ async function serveFiles(req: FastifyRequest, reply: FastifyReply, files: Map<s
   if (path.endsWith('.map'))
     return reply.status(404).send('Not Found')
   let file = files.get(path)
-  // 草稿里的 public/ 在预览时按根路径访问
-  if (!file && channel === 'dev' && files.has(`public/${path}`)) {
+  // public/ 下的文件按应用根路径访问（/logo.png → public/logo.png），各渠道一致
+  if (!file && files.has(`public/${path}`)) {
     file = files.get(`public/${path}`)
     path = `public/${path}`
   }
@@ -81,16 +136,20 @@ async function serveFiles(req: FastifyRequest, reply: FastifyReply, files: Map<s
   if (!file)
     return reply.status(404).headers(SECURITY_HEADERS).send('Not Found')
 
-  const data = await blobs.get(file.hash)
-  if (!data)
+  const raw = await blobs.get(file.hash)
+  if (!raw)
     return reply.status(500).send('文件丢失')
+  // 内容寻址：文件内容变了 hash 就变，改写缓存不会串版本
+  const data = REWRITE_TEXT.test(path)
+    ? rewriteFile(raw, path, base, appUrlPaths(files), file.hash)
+    : raw
   const etag = `"${file.hash.slice(0, 32)}"`
   if (channel !== 'dev' && req.headers['if-none-match'] === etag)
     return reply.status(304).send()
   const headers: Record<string, string> = { 'content-type': mimeOf(path), ...SECURITY_HEADERS }
   if (path === 'index.html') {
     Object.assign(headers, await appPageHeaders(appId, channel, req.headers.host ?? ''), { 'cache-control': 'no-store' })
-    return reply.headers(headers).send(injectPlatformHead(data.toString('utf8')))
+    return reply.headers(headers).send(injectPlatformHead(data.toString('utf8'), appId, channel))
   }
   if (channel === 'dev') {
     headers['cache-control'] = 'no-store'

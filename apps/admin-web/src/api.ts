@@ -6,6 +6,26 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * 后台与应用同源，不能用 cookie 保存会话（应用页面发出的同源请求会自动带上 cookie）。
+ * token 只放内存：sessionStorage 会随 window.open 复制给新标签页，
+ * 而后台打开预览时新标签页里跑的就是应用代码，等于把管理员 token 交给应用。
+ * 刷新页面后 token 丢失，走一次飞书静默登录即可。
+ */
+let token: string | null = null
+
+export function getToken(): string | null {
+  return token
+}
+
+export function setToken(next: string) {
+  token = next
+}
+
+export function clearToken() {
+  token = null
+}
+
 let onUnauthorized: (() => void) | null = null
 export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn
@@ -27,7 +47,10 @@ export async function api<T = any>(path: string, opts: RequestOptions = {}): Pro
       url.searchParams.set(k, String(v))
   }
   const method = opts.method ?? (opts.body !== undefined || opts.formData ? 'POST' : 'GET')
-  const headers: Record<string, string> = { 'X-App-Admin': '1' }
+  const headers: Record<string, string> = {}
+  const token = getToken()
+  if (token)
+    headers.Authorization = `Bearer ${token}`
   let body: BodyInit | undefined
   if (opts.formData) {
     body = opts.formData
@@ -51,6 +74,7 @@ export async function api<T = any>(path: string, opts: RequestOptions = {}): Pro
   }
   catch {}
   if (res.status === 401) {
+    clearToken()
     onUnauthorized?.()
     throw new ApiError('LOGIN_REQUIRED', json?.error_msg ?? '请先登录', 401)
   }
@@ -63,6 +87,23 @@ export async function api<T = any>(path: string, opts: RequestOptions = {}): Pro
   return json?.data as T
 }
 
+/** 下载后台接口返回的文件（Bearer 不能靠 window.open 带上，用 fetch 转 Blob） */
+export async function download(path: string, fallbackName = 'export.csv') {
+  const token = getToken()
+  const res = await fetch(`/admin-api${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!res.ok)
+    throw new ApiError('DOWNLOAD_FAILED', `下载失败（${res.status}）`, res.status)
+  const disposition = res.headers.get('content-disposition') ?? ''
+  const name = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(disposition)?.[1] ?? fallbackName
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = decodeURIComponent(name)
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
+}
+
 /** 订阅 SSE（fetch 实现，支持自定义头与断线重连） */
 export function subscribeSse(path: string, onEvent: (data: any) => void, getAfter: () => number) {
   let stopped = false
@@ -72,7 +113,11 @@ export function subscribeSse(path: string, onEvent: (data: any) => void, getAfte
     while (!stopped) {
       ctrl = new AbortController()
       try {
-        const res = await fetch(`/admin-api${path}?after=${getAfter()}`, { headers: { 'X-App-Admin': '1' }, signal: ctrl.signal })
+        const token = getToken()
+        const res = await fetch(`/admin-api${path}?after=${getAfter()}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: ctrl.signal,
+        })
         if (!res.ok || !res.body)
           throw new Error(String(res.status))
         delay = 1000

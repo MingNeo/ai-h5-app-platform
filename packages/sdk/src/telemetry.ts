@@ -16,7 +16,8 @@ function flush() {
   if (!queue.length)
     return
   const body = JSON.stringify({ events: queue.splice(0, 50) })
-  const url = `${config.apiBase}/telemetry`
+  // sendBeacon 不能带自定义头，appId / 渠道放进查询参数
+  const url = `${config.apiBase}/telemetry?app=${encodeURIComponent(config.appId)}&channel=${encodeURIComponent(config.channel)}`
   // sendBeacon 不能带自定义头，网关对 telemetry 单独放行
   if (!navigator.sendBeacon?.(url, new Blob([body], { type: 'text/plain' }))) {
     fetch(url, { method: 'POST', body, keepalive: true, credentials: 'same-origin', headers: { 'Content-Type': 'text/plain' } }).catch(() => {})
@@ -72,7 +73,7 @@ function devReport(entry: Record<string, unknown>) {
       fetch(`${config.apiBase}/dev/errors`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json', 'X-App-SDK': '1' },
+        headers: { 'Content-Type': 'application/json', 'X-App-SDK': '1', 'X-App-Id': config.appId, 'X-App-Channel': config.channel },
         body: JSON.stringify({ entries }),
       }).catch(() => {})
     }, 1000)

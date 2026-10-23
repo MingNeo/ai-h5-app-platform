@@ -3,7 +3,7 @@
 > 当前代码的实现说明见 [architecture.md](architecture.md)；本文保留产品目标、取舍与里程碑。
 
 ## 0. Context
-内部员工在后台用在线 vibe coding（对话式界面，类似 Codex / Claude）生成 H5 应用，发布到 `{appId}.apps.example.com`，运行在 App WebView 和手机浏览器里。平台要保证：
+内部员工在后台用在线 vibe coding（对话式界面，类似 Codex / Claude）生成 H5 应用，发布到 `apps.example.com/a/{appId}/`，运行在 App WebView 和手机浏览器里。平台要保证：
 - 应用只能访问自身文件和平台提供的接口；
 - 每个应用自动登录（复用主站账号），401 自动拦截到全局登录，登录后重放请求；
 - 每个应用有独立的数据存储。
@@ -21,7 +21,7 @@ v2 相对 v1 方案的变化：
 |---|---|
 | 创建者 / 规模 | 内部员工；百级应用，小流量；AI 代码按不可信处理 |
 | 形态 | 活动页（首期无奖）、工具/表单、H5 小游戏 |
-| 域名 | 线上 `{appId}.apps.example.com`，本地 `{appId}.local.apps.example.com`；靠 hosts 切换，代码里不区分环境 |
+| 域名 | 单域名：线上 `apps.example.com`，本地 `local.example.test`；应用在 `/a/{appId}/`，后台在 `/admin/`；靠 hosts 切换，代码里不区分环境 |
 | 运行 | 应用作为顶层页面运行；nginx 统一代理 |
 | 登录 | 复用主站登录：`.example.com` cookie 天然共享，App 内调原生登录，浏览器弹 SDK 登录框（短信+极验，调用主站登录服务接口） |
 | 用户身份 | 共享全局用户信息；默认游客可读，按需登录；manifest 可配 `requireLogin` |
@@ -37,28 +37,30 @@ v2 相对 v1 方案的变化：
 ## 2. 架构与域名
 ```
             nginx（线上 ingress / 本地 dev-proxy）
- *.apps.example.com / *.local.apps.example.com
- ├ admin.<base>            → admin-web 静态资源 + /admin-api → server
- ├ {appId}.<base>          线上版   ┐
- ├ {appId}--beta.<base>    测试版   ├ /__platform/* → server（gateway，同源）
- └ {appId}--dev.<base>     实时预览 ┘ /*            → server（app-host：源码 / 草稿）
+ apps.example.com（唯一入口，无通配）
+ ├ /admin、/admin/...      → admin-web 静态资源；/admin-api → server
+ ├ /a/{appId}/             线上版   ┐
+ ├ /a/{appId}--beta/       测试版   ├ /__platform/* → server（gateway，同源）
+ └ /a/{appId}--dev/        实时预览 ┘ 其余          → server（app-host：源码 / 草稿）
 
  server（Node.js 单体）：admin-api │ agent │ build-worker │ gateway │ app-host
  MongoDB · Redis · 对象存储（线上 COS / 本地磁盘）· LLM 网关
  外部：login.example.com（登录、用户信息）、业务后端（CORS 直连）
 ```
-- nginx 根据 `server_name` 正则取出 appId 和 channel，通过 `X-App-Id` / `X-App-Channel` 头传给 server。server **只信 nginx 传来的值**；Pod 不对外暴露。
+- 站点由路径区分：`/a/{appId}[--beta|--dev]/`。server 自己解析路径；SDK 请求头的 `X-App-Id` / `X-App-Channel` 只用于平台接口定位应用（可伪造，按已接受风险处理）。单域名意味着应用之间没有 origin 隔离，见 [security-boundary.md](security-boundary.md)。
 - `admin`、`www`、`api`、`static` 等是保留 appId。appId 规则：`[a-z0-9-]{3,30}`，不能包含 `--`。
-- 所有环境都用 https。主站 cookie 很可能带 Secure 属性，本地也必须用 https：用 mkcert 给 `*.local.apps.example.com` 签证书。
+- 所有环境都用 https。主站 cookie 很可能带 Secure 属性，本地也必须用 https：用 mkcert 给 `local.example.test` 签单域名证书。
 
 ## 3. 运行时托管与隔离
 **app-host**
 - 用 `release:{appId}:{channel}` 查到 buildId（Redis，Mongo 兜底），返回该构建的 `index.html`，并在 `<head>` 最前面注入：
   ```html
-  <script>window.__APP_CONFIG__={appId,channel,version,bizApis,requireLogin}</script>
-  <script src="/__platform/sdk.js?v=<sdkVersion>"></script>
+  <script src="/__platform/boot.js?app=<appId>&channel=<channel>"></script>
+  <link rel="stylesheet" href="/__platform/ui.css">
+  <script src="/__platform/tailwind.js"></script>
   ```
-  即使 AI 删掉了 SDK 引用，每个应用也一定带着自动登录和 401 拦截。
+  即使 AI 删掉了平台引用，每个应用也一定带着自动登录和 401 拦截。
+- 应用挂在 `/a/{appId}[--channel]/` 下；源码里的根绝对引用在返回时补前缀（只改写能对应到应用文件的路径）。
 - `/assets/*` 返回 immutable 长缓存，`index.html` 返回 no-cache；未知路径回退 index.html。下线或不在排期内时，返回平台占位页。
 - 静态文件：线上从对象存储读（可加 CDN），本地读磁盘 volume。
 
@@ -68,7 +70,7 @@ default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
 img-src 'self' data: blob: 图片域名白名单（CSP_IMG_EXTRA）; font-src 'self' data:; media-src 'self' blob:;
 connect-src 'self' https://login.example.com https://*.geetest.com;
 frame-src 'none'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self' https://login.example.com;
-frame-ancestors 'self' https://admin.<base>（各渠道都允许后台预览嵌入）
+frame-ancestors 'self'（后台与应用同源，天然允许后台预览嵌入）
 ```
 - 业务接口按「以 / 结尾的路径前缀」授权；应用通过同源 `/__platform/api/biz/*` 调用，由平台网关校验前缀后转发到上游，CSP 不需要放行业务域名。
 - 极验需要的域名（`static.geetest.com`、`gcaptcha4.geetest.com` 等）只在 SDK 登录框用到，统一加进白名单。
@@ -105,12 +107,12 @@ frame-ancestors 'self' https://admin.<base>（各渠道都允许后台预览嵌�
 ```
 
 ### 4.4 需要确认 / 配合（项目里只剩这些外部依赖）
-1. 主站登录服务的登录接口和用户信息接口对 `https://*.apps.example.com` 开放 CORS（v1 是从 `api.example.com` 调的，新 origin 要加白名单）；极验 `from_activity` 要申请一个新的取值。
+1. 主站登录服务的登录接口和用户信息接口对 `https://apps.example.com` 开放 CORS（v1 是从 `api.example.com` 调的，新 origin 要加白名单）；极验 `from_activity` 要申请一个新的取值。
 2. 业务后端对新 origin 开放 CORS（精确回显 Origin + credentials），并在公共中间件里**集中校验 Origin**。因为应用之间、应用和主站都是同站，SameSite 不起作用。
 3. App A 内：cookie 注入的 Domain 要覆盖 `.example.com`（或 App 打开时按 v1 `get_cookies` 同步）。这一项要真机验证。
 4. 主站 `sess` 是否 HttpOnly。如果不是，应用 JS 理论上可以读到，只能靠 app-guard 扫描和审计约束（内部创建者，残余风险可接受）。
 
-## 5. 平台 SDK（`/__platform/sdk.js`，单文件 IIFE，挂 `window.platform`）
+## 5. 平台 SDK（`/__platform/boot.js`，注入配置 + 单文件 SDK，挂 `window.platform`）
 ```ts
 await platform.ready()
 platform.auth.user / isLogin / login() / logout() / onChange(cb)
@@ -209,7 +211,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 - **身份**：可选「我的主站账号」或「游客」。dev 环境还能用测试身份，方便调试 ACL。
 - **调试**：控制台面板展示 SDK 回传的 console 输出、接口请求和报错，报错可以一键交给 AI 修复；数据台和预览联动，直接查看 dev 库里写入的数据。
 - **真机预览**：二维码带短期票据。需要原生能力（JSBridge、原生登录）的场景，必须在 App 里扫码真机验证；iframe 只能模拟浏览器环境。
-- **iframe 可行性**：admin 和应用子域同属 `.example.com`，iframe 里主站 cookie 和预览票据 cookie 都能正常带上，Safari 也不会拦截。各渠道允许 admin origin 嵌入：dev 和 beta 用 `frame-ancestors 'self' https://admin.<base>`；prod 也放行 admin origin，用户访问时不受影响。
+- **iframe 可行性**：后台与应用同源，iframe 里主站 cookie 和预览票据 cookie 都能正常带上，Safari 也不会拦截。CSP 的 `frame-ancestors 'self'` 即可允许后台嵌入预览。
 - **票据写入**：iframe 先访问 `https://{appId}--dev.<base>/__platform/preview-auth?t=<签名票据>`，在这里写入 `__Host-app_preview` cookie，然后 302 到应用首页。
 - `{appId}--dev` 的请求由 server 直接返回草稿文件，没有 dev server、没有 HMR，也没有需要回收的进程。
 - 预览访问：后台签发预览票据，写入 `__Host-` cookie，24h 有效。`--beta` 共用这套票据，二维码里带短期票据。
@@ -233,18 +235,18 @@ platform.app / platform.env                    // appId、channel、inApp、os
 本地不依赖 Docker，全部在宿主机跑：
 | 组件 | 说明 |
 |---|---|
-| `make proxy` | `scripts/dev-proxy.mjs`，443 端口，用 mkcert 生成的 `*.local.apps.example.com` 证书，路由规则与线上 nginx 模板（`deploy/nginx/`）一致 |
+| `make proxy` | `scripts/dev-proxy.mjs`，443 端口，用 mkcert 生成的单域名证书，路由规则与线上 nginx 模板（`deploy/nginx/`）一致 |
 | `make dev` | 一条命令启动 DNS + HTTPS proxy + server（`tsx watch`，agent、preview、build-worker 在同一进程）+ admin-web（Vite dev），就绪后自动打开后台，Ctrl-C 一次全部退出 |
 | Mongo | `MONGO_URL=memory` 启动内置 mongod，数据在 `DATA_DIR/mongo`；也可以指向已有实例 |
 | Redis | 不配 `REDIS_URL` 时用进程内存（只适合单进程） |
 | 对象存储 | 本地磁盘（`DATA_DIR`） |
 
-- 泛域名解析（不需要 hosts）：`make dns-setup` 一次性写入 `/etc/resolver/local.apps.example.com`，指向 `127.0.0.1:5354`；`scripts/dev-dns.mjs` 在该端口应答所有 `*.<base>` → `127.0.0.1`。`make dev` 会同时启动 DNS、proxy、server、admin-web，新建应用无需任何配置。本地基础域名由 `APP_BASE_DOMAIN`（`.env.local` 或环境变量）配置，示例值 `local.apps.example.com`；`make dns` / `make proxy` 可单独启动对应组件。
+- 本地只需要一个入口域名：`make hosts` 把 `APP_BASE_DOMAIN` 写入 `/etc/hosts`。`make dev` 启动 proxy、server、admin-web；新建应用无需任何配置，因为应用都在同一个域名下按路径访问。本地域名由 `APP_BASE_DOMAIN`（`.env.local` 或环境变量）配置，示例值 `local.example.test`。
 - `scripts/hosts-add.sh` 仅作为无法使用 `/etc/resolver` 时的回退方案。
 - `.env.local`：LLM 网关地址和 key、飞书应用配置（本地可开 `DEV_ADMIN_BYPASS=1` 跳过飞书登录）。
 - `make seed`：生成一个 demo 应用（投票页），用来验证全链路。
 - 部署镜像：`make image`（`deploy/Dockerfile`）。
-- 主站登录在本地也能用：域名是 `.example.com` 子域，并且走 https，浏览器会带上真实的主站 cookie（前提是 §4.4 的 CORS 已放开；未放开前用 `DEV_FAKE_USER` 注入模拟用户）。
+- 线上入口域名在 `.example.com` 下，并且走 https，浏览器会带上真实的主站 cookie（前提是 §4.4 的 CORS 已放开；未放开前用 `DEV_FAKE_USER` 注入模拟用户）。本地用 `AUTH_PROVIDER=mock`。
 
 ## 13. 安全汇总
 | 威胁 | 措施 |
@@ -296,13 +298,13 @@ Makefile  scripts/
 | M5（1 周） | 遥测、告警、配额、审计、安全自测 |
 
 ## 17. 验证
-- **本地全链路**：`make dev`、`make seed`，然后打开 `https://demo.local.apps.example.com`：
+- **本地全链路**：`make dev`、`make seed`，然后打开 `https://local.example.test/a/demo/`：
   1. 游客能浏览；
   2. 点投票 → 弹出登录框 → 短信登录 → 投票请求自动重放成功；
   3. 在主站登录服务退出登录后，5 分钟内或切回前台时应用感知到登出；
   4. 在控制台 fetch 外部域名，被 CSP 拦截；
   5. 从 demo 页请求 `other.local-…/__platform/api/db`，被拒。
-- **IDE**：在 `admin.local-…` 创建应用，对话生成投票页，确认改动卡片、diff、执行计划、停止、撤销、预览 HMR、报错一键修复都正常。
+- **IDE**：在 `https://local.example.test/admin/` 创建应用，对话生成投票页，确认改动卡片、diff、执行计划、停止、撤销、预览 HMR、报错一键修复都正常。
 - **单元测试**：DSL 和 ACL（表驱动 + 注入用例）、app-guard 违规样例、SDK 状态机（并发 5 个 401 只登录一次、全部重放；取消后全部 reject）。
 - **集成测试**（testcontainers）：五种 ACL × 本人 / 他人 / 游客；限流和配额。
 - **E2E**：Playwright 移动端模拟跑上述流程（主站登录用 `DEV_FAKE_USER` 打桩）。
