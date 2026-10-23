@@ -14,6 +14,7 @@ export const router = createRouter({
         { path: 'admin/grants', component: () => import('./pages/admin/Grants.vue'), meta: { platformAdmin: true } },
         { path: 'admin/biz-apis', component: () => import('./pages/admin/BizApis.vue'), meta: { platformAdmin: true } },
         { path: 'admin/audit', component: () => import('./pages/admin/Audit.vue'), meta: { platformAdmin: true } },
+        { path: 'admin/api-clients', component: () => import('./pages/admin/ApiClients.vue'), meta: { platformAdmin: true } },
       ],
     },
     {
@@ -25,6 +26,7 @@ export const router = createRouter({
         { path: 'develop', component: () => import('./pages/app/Develop.vue') },
         { path: 'release', component: () => import('./pages/app/Release.vue') },
         { path: 'data', component: () => import('./pages/app/Data.vue') },
+        { path: 'console', component: () => import('./pages/app/Console.vue') },
         { path: 'grants', component: () => import('./pages/app/Grants.vue') },
         { path: 'monitor', component: () => import('./pages/app/Monitor.vue') },
         { path: 'members', component: () => import('./pages/app/Members.vue') },

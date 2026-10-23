@@ -298,6 +298,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `agent_turns` | 轮次、消息、改动、快照指针 |
 | `agent_events` | SSE 事件（`sessionId + seq` 唯一） |
 | `audit_logs` | 审计 |
+| `api_clients` | 开放接口调用方（token 哈希、应用范围、权限、IP 白名单） |
 | `telemetry_events` | 埋点，TTL 30 天 |
 
 应用数据：
@@ -368,7 +369,37 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | 手写 demo 应用 | 模板初始化 + `make seed` 生成 demo |
 | Vue3 + Vant + 构建 | 纯 HTML + 原生 ESM；Tailwind v4 浏览器运行时，零编译零打包 |
 
-## 13. 测试与验证
+## 13. 运营后台与开放接口
+
+### 应用后台视图（`admin.json`）
+
+- 应用根目录的 `admin.json` 是一份**视图配置**，不是代码：只描述要展示什么（计数、分组、表格、说明文字），由后台渲染（[Console.vue](../apps/admin-web/src/pages/app/Console.vue)）。
+- 区块类型：`stat`（计数 / 求和 / 平均）、`chart`（柱状 / 饼图 / 折线）、`table`（筛选、关键字搜索、分页、详情、编辑、删除、新增、CSV 导出）、`text`（说明）。
+- 结构校验在 [shared/admin-view.ts](../packages/shared/src/admin-view.ts)：集合、字段必须在 manifest 中声明，否则拒绝写入。
+- 写入口有三个：应用对话里 AI 通过 `write_file` 写（[tools.ts](../apps/server/src/modules/agent/tools.ts) 写入前校验）；后台「后台视图」页直接编辑（`PUT /admin-api/apps/:appId/admin-view`）；后台「AI 生成」用一句话生成（`POST /admin-api/apps/:appId/admin-view/ai`，只返回配置不落盘，按人 10 次/分钟限流）。
+- 配置规范在 [agent-docs/admin-view.md](../packages/agent-docs/docs/admin-view.md)，模型通过 `read_docs('admin-view')` 读取，后台「配置说明」按钮读同一份（`GET /admin-api/apps/:appId/admin-view/doc`）。
+- 归属草稿文件，随快照和发布流转：`env=dev` 读草稿，`env=prod` 读线上构建快照里的同一文件。
+- `admin.json` **不会**通过应用域名返回（[app-host.ts](../apps/server/src/modules/host/app-host.ts) 直接 404），避免暴露运营配置。
+
+### 数据聚合
+
+- `POST /admin-api/apps/:appId/data/:env/:col/group`：按已声明字段分组计数，返回 `{ field, total, groups }`
+- `POST /admin-api/apps/:appId/data/:env/:col/stats`：`{ op: count|sum|avg, field?, where?, timeField?, interval? }`。带 `timeField` 时按天 / 小时返回 `series`，供折线图
+- 管理端查询额外支持 `search: { value, fields }`：对声明过的字符串字段做不区分大小写的包含匹配；应用 DSL 不开放这个操作
+
+后台「数据」页用它做分组统计；「后台视图」的 stat / chart 区块也用这两个接口。
+
+### 开放接口（`/open-api/v1/*`）
+
+给内网其他系统（例如张大妈活动后台）服务端调用，实现见 [openapi/index.ts](../apps/server/src/modules/openapi/index.ts)。
+
+- 鉴权：`Authorization: Bearer <token>`。`api_clients` 只存 `sha256(token)`，明文在创建时返回一次；支持吊销、应用范围、IP 白名单。
+- 权限：`read` / `write` / `export` / `dev` 四种 scope。默认访问 prod；`env=dev` 必须额外有 `dev`。
+- 接口：应用列表、应用详情（含 manifest）、集合列表与条数、查询、分组统计、单条读写、CSV 导出、应用级 KV 读取。
+- 数据面：管理视角，不过滤 `_owner`；写入仍按 manifest schema 校验；每次调用写 `audit_logs`，actor 为 `client:{id}`；按 token 限流 600 次/分钟。
+- 管理：后台「开放接口」页（仅平台管理员）创建和吊销 token；机器可读文档在 `/open-api/v1/openapi.json`。
+
+## 14. 测试与验证
 
 - `pnpm test`：Vitest，覆盖共享 DSL/manifest、app-guard、identity 等纯逻辑。
 - `make typecheck`：全仓 TypeScript 检查（含 admin-web）。
