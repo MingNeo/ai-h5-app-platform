@@ -7,7 +7,7 @@ import { useAppStore } from '../../stores/app'
 
 const store = useAppStore()
 const appId = store.app!.appId
-const isOwner = computed(() => store.app?.role === 'owner')
+const canPublish = computed(() => store.can('app.publish'))
 
 interface Issue { source: string, severity: string, message: string, file?: string, line?: number }
 interface Build { id: string, status: string, issues: Issue[], sizeBytes: number, summary?: string, confirmations: string[], createdAt: string, finishedAt?: string, createdByName: string }
@@ -141,7 +141,7 @@ onBeforeUnmount(() => clearInterval(timer))
             <el-link v-if="betaHost" type="primary" class="mt-2 text-13px" @click="openBeta">
               {{ betaHost }}
             </el-link>
-            <el-button v-if="isOwner" type="success" class="mt-3" @click="openRelease(beta)">
+            <el-button v-if="canPublish" type="success" class="mt-3" @click="openRelease(beta)">
               确认上线
             </el-button>
             <div v-else class="text-12px text-[var(--muted)] mt-3">
@@ -231,7 +231,7 @@ onBeforeUnmount(() => clearInterval(timer))
         </el-table-column>
         <el-table-column label="操作" width="90">
           <template #default="{ row }">
-            <el-button v-if="row.status === 'success' && isOwner && row.id !== store.app?.prodBuildId" size="small" link type="primary" @click="openRelease(row)">
+            <el-button v-if="row.status === 'success' && canPublish && row.id !== store.app?.prodBuildId" size="small" link type="primary" @click="openRelease(row)">
               上线
             </el-button>
           </template>
@@ -258,7 +258,7 @@ onBeforeUnmount(() => clearInterval(timer))
         <el-table-column label="操作人" width="100" prop="createdByName" />
         <el-table-column label="操作" width="90">
           <template #default="{ row, $index }">
-            <el-button v-if="isOwner && $index > 0 && row.buildId !== store.app?.prodBuildId" size="small" link type="warning" @click="rollback(row)">
+            <el-button v-if="canPublish && $index > 0 && row.buildId !== store.app?.prodBuildId" size="small" link type="warning" @click="rollback(row)">
               回滚到此
             </el-button>
           </template>

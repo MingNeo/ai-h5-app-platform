@@ -1,45 +1,26 @@
 import { loadDoc } from '@app-platform/agent-docs'
 import { ADMIN_VIEW_FILE, type AdminView, parseAdminViewText, validateAdminView } from '@app-platform/shared'
-import { config } from '../../config'
-import { effectiveManifest } from '../../core/apps'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { readDraftText, writeDraft } from '../../core/drafts'
-import { blobs } from '../../lib/blob'
+import { config } from '../../config'
+import { adminViewText } from '../../core/admin-view'
+import { effectiveManifest } from '../../core/apps'
+import { writeDraft } from '../../core/drafts'
 import { err } from '../../lib/errors'
 import { ok, parseBody } from '../../lib/http'
 import { chat } from '../../lib/llm'
-import { col } from '../../lib/mongo'
 import { rateLimit } from '../../lib/store'
-import { requireAppRole } from './auth'
+import { requirePerm } from './auth'
 
 const envSchema = z.enum(['dev', 'prod'])
-
-/** dev 读草稿；prod 读线上构建快照里的同一文件 */
-async function viewText(appId: string, env: 'dev' | 'prod') {
-  if (env === 'dev')
-    return readDraftText(appId, ADMIN_VIEW_FILE)
-  const app = await col.apps.findOne({ _id: appId })
-  if (!app?.prodBuildId)
-    return null
-  const build = await col.builds.findOne({ _id: app.prodBuildId }, { projection: { snapshotId: 1 } })
-  if (!build?.snapshotId)
-    return null
-  const snap = await col.snapshots.findOne({ _id: build.snapshotId }, { projection: { files: 1 } })
-  const file = snap?.files.find(f => f.path === ADMIN_VIEW_FILE)
-  if (!file)
-    return null
-  const data = await blobs.get(file.hash)
-  return data?.toString('utf8') ?? null
-}
 
 export function registerConsoleRoutes(app: FastifyInstance) {
   /** 应用后台视图：AI 或人写在 admin.json，管理端按配置渲染 */
   app.get('/admin-api/apps/:appId/admin-view', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'console.view')
     const env = envSchema.parse((req.query as { env?: string }).env ?? 'dev')
-    const raw = await viewText(appId, env)
+    const raw = await adminViewText(appId, env)
     const manifest = await effectiveManifest(appId, env)
     if (raw === null)
       return ok({ env, raw: null, view: null, errors: [], manifest })
@@ -52,14 +33,14 @@ export function registerConsoleRoutes(app: FastifyInstance) {
   /** 配置规范（agent-docs/admin-view.md），后台直接展示给操作的人 */
   app.get('/admin-api/apps/:appId/admin-view/doc', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'console.view')
     return ok({ markdown: loadDoc('admin-view') })
   })
 
   /** 用一句话生成/修改后台视图；只返回配置，不落盘 */
   app.post('/admin-api/apps/:appId/admin-view/ai', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     if (!await rateLimit(`adminview:ai:${user._id}`, 10, 60))
       throw err.rate('生成太频繁，请稍后再试')
     const { instruction, current } = parseBody(z.object({
@@ -88,7 +69,7 @@ export function registerConsoleRoutes(app: FastifyInstance) {
 
   app.put('/admin-api/apps/:appId/admin-view', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const { content } = parseBody(z.object({ content: z.string().max(200_000) }), req.body)
     const parsed = parseAdminViewText(content)
     if (!parsed.ok)

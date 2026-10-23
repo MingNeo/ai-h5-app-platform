@@ -1,8 +1,9 @@
 // 初始化本地演示数据：开发者账号 + demo 投票应用（生成测试版并上线）
-import { appUrl } from '@app-platform/shared'
+import { type AppRole, appUrl } from '@app-platform/shared'
 import { config } from '../config'
 import { initDraft, writeDraft } from '../core/drafts'
 import { MANIFEST, VOTE_PAGE } from '../lib/llm-mock'
+import { MongoClient } from 'mongodb'
 import { closeMongo, col, connectMongo } from '../lib/mongo'
 import { initStore } from '../lib/store'
 import { newId } from '../lib/tokens'
@@ -10,14 +11,79 @@ import { kickBuilds, release, requestBuild } from '../modules/build/service'
 
 const APP_ID = process.argv[2] || 'demo'
 
+/** 演示账号：每个应用角色一个，本地免登下拉里可以直接选来验证权限 */
+const DEV_USERS: Array<{ name: string, role: AppRole }> = [
+  { name: '演示-只读', role: 'viewer' },
+  { name: '演示-运营', role: 'operator' },
+  { name: '演示-开发者', role: 'developer' },
+  { name: '演示-发布员', role: 'publisher' },
+  { name: '演示-数据管理员', role: 'data' },
+]
+
+async function ensureUser(name: string, isPlatformAdmin: boolean) {
+  const now = new Date()
+  const existing = await col.adminUsers.findOne({ feishuOpenId: `dev:${name}` })
+  if (existing) {
+    await col.adminUsers.updateOne({ _id: existing._id }, { $set: { isPlatformAdmin } })
+    return existing._id
+  }
+  const id = newId()
+  await col.adminUsers.insertOne({ _id: id, feishuOpenId: `dev:${name}`, name, avatar: '', email: '', isPlatformAdmin, createdAt: now, lastLoginAt: now })
+  return id
+}
+
+async function ensureRoleUsers() {
+  for (const u of DEV_USERS) {
+    const userId = await ensureUser(u.name, false)
+    const now = new Date()
+    await col.members.updateOne({ appId: APP_ID, userId }, {
+      $set: { role: u.role, perms: null },
+      $setOnInsert: { _id: newId(), appId: APP_ID, userId, createdAt: now },
+    }, { upsert: true })
+  }
+  console.log(`演示角色账号：${DEV_USERS.map(u => `${u.name}（${u.role}）`).join('、')}`)
+}
+
+/** 负责人成员关系要跟着当前账号走；顺带清理指向已删除用户的记录 */
+async function ensureOwner(userId: string) {
+  const now = new Date()
+  await col.members.updateOne({ appId: APP_ID, userId }, {
+    $set: { role: 'owner', perms: null },
+    $setOnInsert: { _id: newId(), appId: APP_ID, userId, createdAt: now },
+  }, { upsert: true })
+  const users = await col.adminUsers.find({}, { projection: { _id: 1 } }).toArray()
+  await col.members.deleteMany({ appId: APP_ID, userId: { $nin: users.map(u => u._id) } })
+}
+
+/**
+ * MONGO_URL=memory 时 mongod 固定在 27018。开发服务器已经跑着的情况下，
+ * 直接复用它，避免端口冲突（数据目录本来就是同一个）。
+ */
+async function connectForSeed() {
+  if (config.mongoUrl !== 'memory')
+    return connectMongo()
+  try {
+    const probe = new MongoClient('mongodb://127.0.0.1:27018', { serverSelectionTimeoutMS: 800 })
+    await probe.connect()
+    await probe.db('admin').command({ ping: 1 })
+    await probe.close()
+    console.log('复用已运行的本地 Mongo（127.0.0.1:27018）')
+    return connectMongo('mongodb://127.0.0.1:27018/app_platform')
+  }
+  catch {
+    return connectMongo()
+  }
+}
+
 async function main() {
   initStore()
-  await connectMongo()
-  let user = await col.adminUsers.findOne({ feishuOpenId: 'dev:本地开发者' })
-  if (!user) {
-    user = { _id: newId(), feishuOpenId: 'dev:本地开发者', name: '本地开发者', avatar: '', email: '', isPlatformAdmin: true, createdAt: new Date(), lastLoginAt: new Date() }
-    await col.adminUsers.insertOne(user)
-  }
+  await connectForSeed()
+  const ownerId = await ensureUser('本地开发者', true)
+  const user = await col.adminUsers.findOne({ _id: ownerId })
+  if (!user)
+    throw new Error('演示账号创建失败')
+  await ensureOwner(ownerId)
+  await ensureRoleUsers()
   const existing = await col.apps.findOne({ _id: APP_ID })
   if (existing?.prodBuildId) {
     console.log(`应用 ${APP_ID} 已存在，跳过`)

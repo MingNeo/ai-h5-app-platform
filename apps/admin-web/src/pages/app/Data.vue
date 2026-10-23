@@ -6,9 +6,10 @@ import { useAppStore } from '../../stores/app'
 
 const store = useAppStore()
 const appId = store.app!.appId
-const isOwner = computed(() => store.app?.role === 'owner')
 const env = ref<'dev' | 'prod'>('dev')
-const canWrite = computed(() => env.value === 'dev' ? store.canEdit() : isOwner.value)
+const canWrite = computed(() => env.value === 'dev' ? store.can('data.write.dev') : store.can('data.write.prod'))
+const canExport = computed(() => store.can('data.export'))
+const canSync = computed(() => store.can('data.export', 'data.write.prod'))
 
 interface ColInfo { name: string, acl: string, description: string, fields: Record<string, any>, count: number }
 const collections = ref<ColInfo[]>([])
@@ -230,10 +231,10 @@ onMounted(loadCollections)
           <el-button size="small" :disabled="!canWrite" @click="openEdit()">
             新增
           </el-button>
-          <el-button v-if="isOwner" size="small" @click="exportCsv">
+          <el-button v-if="canExport" size="small" @click="exportCsv">
             导出 CSV
           </el-button>
-          <el-button v-if="isOwner && env === 'dev' && currentCol.acl === 'readonly'" size="small" type="warning" plain @click="syncToProd">
+          <el-button v-if="canSync && env === 'dev' && currentCol.acl === 'readonly'" size="small" type="warning" plain @click="syncToProd">
             同步到正式环境
           </el-button>
         </div>

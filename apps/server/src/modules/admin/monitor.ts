@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import { ok } from '../../lib/http'
 import { col } from '../../lib/mongo'
-import { requireAppRole } from './auth'
+import { requirePerm } from './auth'
 
 export function registerMonitorRoutes(app: FastifyInstance) {
   app.get('/admin-api/apps/:appId/stats', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'console.view')
     const days = Math.min(Number((req.query as { days?: string }).days ?? 7), 30)
     const since = new Date(Date.now() - days * 86400_000)
     const match = { appId, channel: 'prod', ts: { $gte: since } }

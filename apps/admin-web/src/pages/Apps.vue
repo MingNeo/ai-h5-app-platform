@@ -27,6 +27,14 @@ const form = reactive({ appId: '', name: '', description: '' })
 
 const filtered = computed(() => apps.value.filter(a => !keyword.value || a.name.includes(keyword.value) || a.appId.includes(keyword.value)))
 const appIdError = computed(() => form.appId ? validateAppId(form.appId) : null)
+function slugOf(name: string) {
+  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 24).replace(/-+$/g, '')
+  return slug.length >= 3 ? slug : ''
+}
+const appIdHint = computed(() => {
+  const slug = slugOf(form.name)
+  return slug ? `留空自动生成，如：${slug}` : '留空自动生成'
+})
 
 async function load() {
   loading.value = true
@@ -41,11 +49,12 @@ async function load() {
 async function create() {
   if (!form.name.trim())
     return ElMessage.warning('请填写应用名称')
-  if (appIdError.value || !form.appId)
-    return ElMessage.warning(appIdError.value ?? '请填写 appId')
+  if (form.appId && appIdError.value)
+    return ElMessage.warning(appIdError.value)
   creating.value = true
   try {
-    const app = await api<AppItem>('/apps', { body: form })
+    const payload = { ...form, appId: form.appId.trim() || undefined }
+    const app = await api<AppItem>('/apps', { body: payload })
     showCreate.value = false
     await router.push(`/apps/${app.appId}/develop`)
   }
@@ -117,8 +126,8 @@ onMounted(async () => {
         <el-form-item label="应用名称" required>
           <el-input v-model="form.name" maxlength="40" placeholder="例如：春季好物投票" />
         </el-form-item>
-        <el-form-item label="appId（用于访问地址，创建后不能修改）" required :error="appIdError ?? ''">
-          <el-input v-model="form.appId" maxlength="30" placeholder="例如：spring-vote">
+        <el-form-item label="appId（用于访问地址，创建后不能修改）" :error="appIdError ?? ''">
+          <el-input v-model="form.appId" maxlength="30" :placeholder="appIdHint">
             <template #prepend>
               /a/
             </template>
