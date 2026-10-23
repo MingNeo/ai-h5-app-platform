@@ -223,6 +223,9 @@ platform.app / platform.env                    // appId、channel、inApp、os
 
 ## 11. 后台
 - 飞书 OAuth 登录（限本企业）。角色：平台管理员；应用级 owner / developer / viewer。
+- **数据台**：dev / prod 切换、集合与字段、分页查询、增删改、CSV 导出、readonly 同步、应用级 KV、按字段分组统计。
+- **后台视图**：应用里的 `admin.json` 描述运营要看什么（数字卡片、柱状/饼图/折线、可筛选可搜索可编辑的表格、说明），后台按配置渲染；AI 对话、后台「AI 生成」、手写 JSON 三种方式都能产出，规范见 `agent-docs/admin-view.md`。
+- **开放接口**：内网系统用 Bearer token 调 `/open-api/v1/*`，读数据、统计、导出；token 在后台「开放接口」页管理，按应用和 scope 授权，调用留审计。
 - 页面：应用列表与创建、Vibe IDE（§9）、能力申请与审批、数据台、发布、监控、成员、审计、平台设置（模型、模板、业务接口目录）。
 - 技术：Vue3 + Element Plus + Monaco + monaco diff。后台接口不开放 CORS，cookie 用 `__Host-` 前缀 + `SameSite=Strict`，请求必须带自定义头。
 

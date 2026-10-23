@@ -9,6 +9,8 @@ import { readPreviewClaims } from './core/preview-access'
 import { errorHandler } from './lib/http'
 import { mimeOf } from './lib/mime'
 import { registerAdminAuth } from './modules/admin/auth'
+import { registerApiClientRoutes } from './modules/admin/api-clients'
+import { registerConsoleRoutes } from './modules/admin/console'
 import { registerAppRoutes } from './modules/admin/apps'
 import { registerDataRoutes } from './modules/admin/data'
 import { registerFileRoutes } from './modules/admin/files'
@@ -19,6 +21,7 @@ import { registerAgentRoutes } from './modules/agent/routes'
 import { registerGateway } from './modules/gateway'
 import { serveAppBuild, serveAppDraft } from './modules/host/app-host'
 import { placeholderPage } from './modules/host/pages'
+import { registerOpenApi } from './modules/openapi'
 
 const ADMIN_DIST = join(config.repoRoot, 'apps/admin-web/dist')
 
@@ -52,7 +55,10 @@ export async function buildApp() {
   registerDataRoutes(app)
   registerGrantRoutes(app)
   registerMonitorRoutes(app)
+  registerConsoleRoutes(app)
+  registerApiClientRoutes(app)
   registerGateway(app)
+  registerOpenApi(app)
 
   // 后台静态资源、实时预览（直接返回草稿文件）、线上版 / 测试版
   app.route({

@@ -47,6 +47,32 @@ async function main() {
     await initDraft(APP_ID, '方案投票（演示）', user._id)
     await writeDraft(APP_ID, 'manifest.json', `${JSON.stringify({ ...MANIFEST, name: '方案投票（演示）' }, null, 2)}\n`, { userId: user._id })
     await writeDraft(APP_ID, 'src/pages/home.js', VOTE_PAGE, { userId: user._id })
+    await writeDraft(APP_ID, 'admin.json', `${JSON.stringify({
+      title: '投票后台',
+      description: '查看投票情况、导出投票明细',
+      pages: [{
+        title: '概览',
+        blocks: [
+          { type: 'stat', title: '总票数', collection: 'votes', unit: '票' },
+          { type: 'chart', title: '各选项占比', collection: 'votes', chart: 'pie', field: 'option' },
+          { type: 'chart', title: '每日投票', collection: 'votes', chart: 'line', timeField: '_createdAt', interval: 'day' },
+          { type: 'text', content: '每人限投一票，数据实时读取。' },
+        ],
+      }, {
+        title: '投票明细',
+        blocks: [
+          {
+            type: 'table',
+            title: '投票记录',
+            collection: 'votes',
+            columns: ['option'],
+            orderBy: [['_createdAt', 'desc']],
+            filters: [{ field: 'option', type: 'select', label: '选项' }],
+            actions: { detail: true, delete: true },
+          },
+        ],
+      }],
+    }, null, 2)}\n`, { userId: user._id })
     console.log(`已创建应用 ${APP_ID}，正在生成测试版…`)
     const build = await requestBuild(APP_ID, user._id)
     let done = await col.builds.findOne({ _id: build._id })

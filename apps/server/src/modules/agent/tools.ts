@@ -1,5 +1,5 @@
 import { DOC_TOPICS, type DocTopic, loadDoc } from '@app-platform/agent-docs'
-import { type CheckIssue, fieldsToJsonSchema, MANIFEST_FILE, normalizeQuery, parseManifestText, renderBizApiDetail, renderBizApiIndex, type TodoItem } from '@app-platform/shared'
+import { ADMIN_VIEW_FILE, type CheckIssue, fieldsToJsonSchema, MANIFEST_FILE, normalizeQuery, parseAdminViewText, parseManifestText, renderBizApiDetail, renderBizApiIndex, type TodoItem, validateAdminView } from '@app-platform/shared'
 import Ajv from 'ajv'
 import type { Document } from 'mongodb'
 import { draftManifest } from '../../core/apps'
@@ -133,6 +133,16 @@ async function validateManifestWrite(content: string) {
     throw new AppError('VALIDATION_FAILED', `manifest.json 校验失败，未写入：\n${res.errors.join('\n')}`)
 }
 
+/** admin.json：结构校验 + 引用的集合/字段必须在 manifest 中 */
+async function validateAdminViewWrite(appId: string, content: string) {
+  const res = parseAdminViewText(content)
+  if (!res.ok)
+    throw new AppError('VALIDATION_FAILED', `admin.json 校验失败，未写入：\n${res.errors.join('\n')}`)
+  const errors = validateAdminView(res.view, (await draftManifest(appId)).manifest)
+  if (errors.length)
+    throw new AppError('VALIDATION_FAILED', `admin.json 引用的集合/字段有误，未写入：\n${errors.join('\n')}`)
+}
+
 type Args = Record<string, any>
 
 async function run(ctx: ToolContext, name: string, args: Args): Promise<ToolOutput> {
@@ -164,6 +174,8 @@ async function run(ctx: ToolContext, name: string, args: Args): Promise<ToolOutp
       const content = String(args.content ?? '')
       if (path === MANIFEST_FILE)
         await validateManifestWrite(content)
+      if (path === ADMIN_VIEW_FILE)
+        await validateAdminViewWrite(appId, content)
       const existed = (await readDraftText(appId, path)) !== null
       await writeDraft(appId, path, content, { userId })
       ctx.dirty = true
@@ -186,13 +198,15 @@ async function run(ctx: ToolContext, name: string, args: Args): Promise<ToolOutp
       const next = args.replace_all ? text.split(oldStr).join(newStr) : text.replace(oldStr, () => newStr)
       if (path === MANIFEST_FILE)
         await validateManifestWrite(next)
+      if (path === ADMIN_VIEW_FILE)
+        await validateAdminViewWrite(appId, next)
       await writeDraft(appId, path, next, { userId })
       ctx.dirty = true
       return { ok: true, output: `已修改 ${path}${args.replace_all ? `（替换 ${count} 处）` : ''}`, summary: path }
     }
     case 'delete_file': {
       const path = String(args.path ?? '')
-      if (path === MANIFEST_FILE || path === 'index.html' || path === 'src/app.js')
+      if (path === MANIFEST_FILE || path === ADMIN_VIEW_FILE || path === 'index.html' || path === 'src/app.js')
         return { ok: false, output: `${path} 是必需文件，不能删除`, summary: path }
       await deleteDraft(appId, path, { userId })
       ctx.dirty = true

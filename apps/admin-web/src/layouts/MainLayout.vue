@@ -34,6 +34,9 @@ async function logout() {
           <el-menu-item index="/admin/audit">
             操作日志
           </el-menu-item>
+          <el-menu-item index="/admin/api-clients">
+            开放接口
+          </el-menu-item>
         </template>
       </el-menu>
       <el-dropdown>

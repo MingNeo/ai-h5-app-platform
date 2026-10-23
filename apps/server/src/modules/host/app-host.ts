@@ -1,4 +1,5 @@
 import { BOOT_SCRIPT, TAILWIND_SCRIPT } from '@app-platform/app-template'
+import { ADMIN_VIEW_FILE } from '@app-platform/shared'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { getApp, isWithinSchedule } from '../../core/apps'
 import { currentFiles } from '../../core/drafts'
@@ -62,6 +63,9 @@ async function serveFiles(req: FastifyRequest, reply: FastifyReply, files: Map<s
   let path = decodeURIComponent((req.url.split('?')[0] ?? '/').replace(/^\/+/, ''))
   if (path === '' || path.endsWith('/'))
     path += 'index.html'
+  // 后台视图配置只在管理端读取，不对应用访问者暴露
+  if (path === ADMIN_VIEW_FILE)
+    return reply.status(404).headers(SECURITY_HEADERS).send('Not Found')
   if (path.endsWith('.map'))
     return reply.status(404).send('Not Found')
   let file = files.get(path)
