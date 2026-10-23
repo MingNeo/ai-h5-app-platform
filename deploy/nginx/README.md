@@ -64,7 +64,7 @@ spec:
 ## 注意事项
 
 - **不要注入 `X-App-Id` / `X-App-Channel`**：server 自己按路径和 SDK 请求头解析。
-- **不要给 `/admin` 配独立域名或独立端口**：后台与应用同源，认证依赖这一点（Bearer + sessionStorage，见 [docs/security-boundary.md](../../docs/security-boundary.md)）。
+- **不要给 `/admin` 配独立域名或独立端口**：后台与应用同源，认证依赖这一点（Bearer + 内存 token，见 [docs/security-boundary.md](../../docs/security-boundary.md)）。
 - **`/admin` 的响应头必须原样透传**：`Cross-Origin-Opener-Policy: same-origin`、`X-Frame-Options: DENY`、`Content-Security-Policy`。如果反向代理改写了这些头，后台 token 的防护会失效。
 - WebSocket 升级和 SSE（AI 对话）需要 `Upgrade` / `Connection` 头和关闭缓冲。
 - 证书到期前正常续期即可，与应用数量无关。

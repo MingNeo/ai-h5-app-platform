@@ -10,7 +10,7 @@ import { availableModels, llmConfigured } from '../../lib/llm'
 import { col } from '../../lib/mongo'
 import { store } from '../../lib/store'
 import { newId } from '../../lib/tokens'
-import { requireAppRole } from '../admin/auth'
+import { requirePerm } from '../admin/auth'
 import { subscribeSession } from './events'
 import { enqueueTurn, stopTurn } from './runner'
 
@@ -38,7 +38,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.get('/admin-api/apps/:appId/sessions', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'app.edit')
     const list = await col.sessions.find({ appId }).sort({ updatedAt: -1 }).limit(100).toArray()
     const running = await col.turns.find({ appId, status: { $in: ['queued', 'running'] } }, { projection: { sessionId: 1, status: 1 } }).toArray()
     const runningBy = new Map(running.map(t => [t.sessionId, t.status]))
@@ -51,7 +51,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/sessions', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const { title } = parseBody(z.object({ title: z.string().max(50).default('新会话') }), req.body)
     const now = new Date()
     const id = newId()
@@ -61,7 +61,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.patch('/admin-api/sessions/:id', async (req) => {
     const s = await sessionOf((req.params as { id: string }).id)
-    await requireAppRole(req, s.appId, 'developer')
+    await requirePerm(req, s.appId, 'app.edit')
     const { title } = parseBody(z.object({ title: z.string().trim().min(1).max(50) }), req.body)
     await col.sessions.updateOne({ _id: s._id }, { $set: { title } })
     return ok({})
@@ -69,7 +69,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.delete('/admin-api/sessions/:id', async (req) => {
     const s = await sessionOf((req.params as { id: string }).id)
-    await requireAppRole(req, s.appId, 'developer')
+    await requirePerm(req, s.appId, 'app.edit')
     if (await col.turns.findOne({ sessionId: s._id, status: { $in: ['queued', 'running'] } }))
       throw err.invalid('会话中还有任务在执行，请先停止')
     await Promise.all([col.sessions.deleteOne({ _id: s._id }), col.turns.deleteMany({ sessionId: s._id }), col.events.deleteMany({ sessionId: s._id })])
@@ -79,7 +79,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
   /** 会话的全部事件（首次加载），之后用 /stream?after=seq 续传 */
   app.get('/admin-api/sessions/:id/events', async (req) => {
     const s = await sessionOf((req.params as { id: string }).id)
-    await requireAppRole(req, s.appId, 'viewer')
+    await requirePerm(req, s.appId, 'app.edit')
     const events = await col.events.find({ sessionId: s._id }, { projection: { _id: 0 } }).sort({ seq: 1 }).toArray()
     const turns = await col.turns.find({ sessionId: s._id }, { projection: { messages: 0 } }).sort({ index: 1 }).toArray()
     return ok({
@@ -91,7 +91,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.get('/admin-api/sessions/:id/stream', async (req, reply) => {
     const s = await sessionOf((req.params as { id: string }).id)
-    await requireAppRole(req, s.appId, 'viewer')
+    await requirePerm(req, s.appId, 'app.edit')
     const after = Number((req.query as { after?: string }).after ?? 0)
     reply.hijack()
     const raw = reply.raw
@@ -128,7 +128,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/sessions/:id/messages', async (req) => {
     const s = await sessionOf((req.params as { id: string }).id)
-    const { user } = await requireAppRole(req, s.appId, 'developer')
+    const { user } = await requirePerm(req, s.appId, 'app.edit')
     const body = parseBody(z.object({
       message: z.string().trim().min(1).max(20000),
       attachments: z.array(attachmentSchema).max(10).default([]),
@@ -154,7 +154,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
     const t = await col.turns.findOne({ _id: (req.params as { id: string }).id })
     if (!t)
       throw err.notFound('任务不存在')
-    await requireAppRole(req, t.appId, 'developer')
+    await requirePerm(req, t.appId, 'app.edit')
     await stopTurn(t._id)
     return ok({})
   })
@@ -164,7 +164,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
     const t = await col.turns.findOne({ _id: (req.params as { id: string }).id })
     if (!t)
       throw err.notFound('任务不存在')
-    const { user } = await requireAppRole(req, t.appId, 'developer')
+    const { user } = await requirePerm(req, t.appId, 'app.edit')
     if (!t.snapshotBefore || !t.changes.length)
       throw err.invalid('这一轮没有文件改动')
     const before = await getSnapshot(t.appId, t.snapshotBefore)
@@ -190,7 +190,7 @@ export function registerAgentRoutes(app: FastifyInstance) {
     const t = await col.turns.findOne({ _id: (req.params as { id: string }).id })
     if (!t?.snapshotBefore)
       throw err.notFound('任务不存在')
-    const { user } = await requireAppRole(req, t.appId, 'developer')
+    const { user } = await requirePerm(req, t.appId, 'app.edit')
     const before = await getSnapshot(t.appId, t.snapshotBefore)
     const changes = await restoreSnapshot(t.appId, before, { userId: user._id })
     const snap = await createSnapshot(t.appId, { kind: 'rollback', message: `回滚到「${t.message.slice(0, 30)}」之前`, userId: user._id })
