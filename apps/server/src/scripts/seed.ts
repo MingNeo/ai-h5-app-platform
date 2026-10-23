@@ -46,7 +46,7 @@ async function main() {
     await col.members.insertOne({ _id: newId(), appId: APP_ID, userId: user._id, role: 'owner', createdAt: now })
     await initDraft(APP_ID, '方案投票（演示）', user._id)
     await writeDraft(APP_ID, 'manifest.json', `${JSON.stringify({ ...MANIFEST, name: '方案投票（演示）' }, null, 2)}\n`, { userId: user._id })
-    await writeDraft(APP_ID, 'src/pages/Home.vue', VOTE_PAGE, { userId: user._id })
+    await writeDraft(APP_ID, 'src/pages/home.js', VOTE_PAGE, { userId: user._id })
     console.log(`已创建应用 ${APP_ID}，正在生成测试版…`)
     const build = await requestBuild(APP_ID, user._id)
     let done = await col.builds.findOne({ _id: build._id })

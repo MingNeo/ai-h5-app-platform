@@ -32,7 +32,7 @@ function toggle(set: Set<number>, i: number) {
 function toolText(i: ToolItem) {
   const label = TOOL_LABEL[i.name] ?? i.name
   const target = i.input?.path ?? (i.input?.from ? `${i.input.from} → ${i.input.to}` : '')
-  const extra = i.name === 'grep' ? i.input?.pattern : i.name === 'glob' ? i.input?.pattern : i.name === 'read_docs' ? i.input?.topic : i.name.startsWith('db_') ? i.input?.collection : i.name === 'add_dependency' ? i.input?.name : ''
+  const extra = i.name === 'grep' ? i.input?.pattern : i.name === 'glob' ? i.input?.pattern : i.name === 'read_docs' ? i.input?.topic : i.name.startsWith('db_') ? i.input?.collection : ''
   return [label, target || extra].filter(Boolean).join(' ')
 }
 
@@ -131,7 +131,7 @@ function issuesText(issues: Array<{ file?: string, line?: number, message: strin
 
         <div v-else-if="seg.kind === 'check'" class="text-13px rounded-lg px-3 py-2" :class="seg.status === 'passed' ? 'bg-green-50 text-green-700' : seg.status === 'failed' ? 'bg-orange-50 text-orange-700' : 'bg-gray-50 text-[var(--muted)]'">
           <div class="flex items-center gap-2">
-            <span v-if="seg.status === 'running'" class="animate-pulse">正在校验（安全扫描、类型检查、构建）…</span>
+            <span v-if="seg.status === 'running'" class="animate-pulse">正在校验（manifest、安全扫描、业务接口、语法）…</span>
             <span v-else-if="seg.status === 'passed'">✓ 校验通过{{ seg.issues.length ? `（${seg.issues.length} 个提示）` : '' }}</span>
             <span v-else>✕ 校验发现 {{ seg.issues.filter(x => x.severity === 'error').length }} 个问题{{ seg.autoFixRound ? `，AI 正在自动修复（第 ${seg.autoFixRound} 次）` : '' }}</span>
             <el-button v-if="seg.issues.length" size="small" link @click="toggle(openIssues, i)">

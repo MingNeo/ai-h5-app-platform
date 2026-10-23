@@ -25,8 +25,8 @@ v2 相对 v1 方案的变化：
 | 运行 | 应用作为顶层页面运行；nginx 统一代理 |
 | 登录 | 复用主站登录：`.example.com` cookie 天然共享，App 内调原生登录，浏览器弹 SDK 登录框（短信+极验，调用主站登录服务接口） |
 | 用户身份 | 共享全局用户信息；默认游客可读，按需登录；manifest 可配 `requireLogin` |
-| 应用栈 | Vue3 + Vant + UnoCSS；平台统一模板和构建配置 |
-| SDK | 平台托管的 `/__platform/sdk.js`，由 host 自动注入；模板自带 `platform.d.ts`；**不发 npm** |
+| 应用栈 | 纯 HTML + 原生 ES 模块；Tailwind v4 浏览器运行时 + 原生 HTML 交互；零编译、零打包 |
+| SDK | 平台托管的 `/__platform/boot.js`，由 host 自动注入，提供全局对象 `platform`；**不发 npm** |
 | Vibe | 自研 Agent（结构化工具，不给 shell），模型走公司 LLM 网关；对话式界面，类似 Codex / Claude |
 | 版本 | 平台快照，支持回滚；可在线编辑，不加锁 |
 | 数据 | MongoDB；文档集合 + KV + 文件；集合级 ACL 预设 + schema 校验；首期不做云函数 |
@@ -41,9 +41,9 @@ v2 相对 v1 方案的变化：
  ├ admin.<base>            → admin-web 静态资源 + /admin-api → server
  ├ {appId}.<base>          线上版   ┐
  ├ {appId}--beta.<base>    测试版   ├ /__platform/* → server（gateway，同源）
- └ {appId}--dev.<base>     实时预览 ┘ /*            → server（app-host / 预览代理）
+ └ {appId}--dev.<base>     实时预览 ┘ /*            → server（app-host：源码 / 草稿）
 
- server（Node.js 单体）：admin-api │ agent │ preview │ build-worker │ gateway │ app-host
+ server（Node.js 单体）：admin-api │ agent │ build-worker │ gateway │ app-host
  MongoDB · Redis · 对象存储（线上 COS / 本地磁盘）· LLM 网关
  外部：login.example.com（登录、用户信息）、业务后端（CORS 直连）
 ```
@@ -122,9 +122,9 @@ platform.biz.request('/api/xxx', { method, data })   // 经平台同源代理转
 platform.app / platform.env                    // appId、channel、inApp、os
 ```
 - 统一错误类型 `PlatformError{code}`。
-- 模板里附带 `src/platform.d.ts` 提供类型，构建时把 `platform` 作为全局变量，不打进应用包。
-- SDK 版本由平台统一升级，应用不用重新构建；有破坏性变更时用 `sdk.v2.js` 区分。
-- 登录弹窗用原生 DOM + 内联样式实现，不依赖应用里的 Vue/Vant 版本。
+- `platform` 是 boot.js 注入的全局对象，应用不需要 import，也没有类型文件。
+- SDK 版本由平台统一升级，应用不用做任何改动；有破坏性变更时用 `sdk.v2.js` 区分。
+- 登录弹窗用原生 DOM + 内联样式实现，不依赖应用的技术栈。
 
 ## 6. Gateway（`/__platform/api/*`，同源）
 - 路由：`auth/me`、`db/:col/query|count`、`db/:col`、`db/:col/:id`、`kv/user/:key`、`kv/app/:key`、`files/upload`、`files/:id`、`telemetry`、`dev/errors`（仅预览）。
@@ -162,7 +162,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 │          │  └────────────────────────────┘          │  [让 AI 修复]      │
 │          │  ▸ 已查看 3 个文件、修改 2 个文件（展开）│                    │
 │          │  ┌ 改动 ─────────────────────┐          │                    │
-│          │  │ src/pages/Vote.vue  +32 -4 [查看差异]│                    │
+│          │  │ src/pages/vote.js   +32 -4 [查看差异]│                    │
 │          │  │ manifest.json       +8     [查看差异]│                    │
 │          │  └ [撤销本轮改动]─────────────┘          │                    │
 │          │  ✓ 校验通过 · 预览已更新                 │                    │
@@ -192,8 +192,8 @@ platform.app / platform.env                    // appId、channel、inApp、os
 - 用 Vercel AI SDK 实现多步工具调用，接 OpenAI 兼容的 LLM 网关；模型可在后台切换。
 - 事件协议（SSE，同时落库 `agent_events`，断线后可续传）：
   `turn.start` `text.delta` `thinking.delta` `tool.start{id,name,input}` `tool.result{id,ok,output,diff?}` `todo.update` `files.changed` `turn.done{usage,snapshotId}` `error`
-- 工具（不提供 shell）：`list_files` `read_file` `write_file` `edit_file`（精确查找替换）`delete_file` `move_file` `glob` `grep` `todo_write` `update_manifest` `add_dependency`（只能加镜像里预装的白名单包，不执行 npm install）`check`（vue-tsc 增量 + app-guard + 业务接口调用核对 + 构建试跑）`get_runtime_errors` `db_query` / `db_seed`（只作用于 dev）`read_docs`（SDK、模板、manifest）`read_biz_api`（按需读取已授权业务接口的文档）。
-- 系统提示：模板规范、依赖白名单、样式（UnoCSS presetWind3，禁止 Tailwind/CDN 外链）、移动端 H5 规范（vw 适配、安全区、Vant 用法）、SDK 文档、禁用项、当前 manifest 和文件树。较早的对话做摘要压缩。
+- 工具（不提供 shell）：`list_files` `read_file` `write_file` `edit_file`（精确查找替换）`delete_file` `move_file` `glob` `grep` `todo_write` `check`（manifest + app-guard + 业务接口调用核对 + JS 语法检查）`get_runtime_errors` `db_query` / `db_seed`（只作用于 dev）`read_docs`（规范、SDK、manifest）`read_biz_api`（按需读取已授权业务接口的文档）。
+- 系统提示：纯 HTML + 原生 JS 规范、Tailwind 用法、移动端 H5 规范（vw 适配、安全区）、SDK 文档、禁用项、当前 manifest 和文件树。较早的对话做摘要压缩。
 - 约束：每轮工具调用 ≤ 40 次，并有 token 上限；结束前强制跑 `check`，失败自动修复 ≤ 3 轮；中断时保存「已中断」快照。按人 / 应用统计用量，设日预算。
 - 快照：每轮结束和手动保存时生成快照（文件按内容哈希存储）；回滚 = 恢复到所选快照并新记一条快照。
 
@@ -201,7 +201,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 
 **后台在线看效果**：IDE 右栏和应用详情页都有预览面板。面板里是一个 iframe，套在手机外壳里。
 - **版本切换**：
-  - 草稿实时：`--dev`，支持 HMR，AI 每改一次文件就自动刷新；
+  - 草稿实时：`--dev`，直接返回草稿源码，AI 改完刷新即可；
   - 测试版：`--beta`；
   - 线上：prod；
   - 任意历史快照：`--dev?snapshot=<id>`，按需构建后只读预览，用于回滚前对比。
@@ -211,13 +211,13 @@ platform.app / platform.env                    // appId、channel、inApp、os
 - **真机预览**：二维码带短期票据。需要原生能力（JSBridge、原生登录）的场景，必须在 App 里扫码真机验证；iframe 只能模拟浏览器环境。
 - **iframe 可行性**：admin 和应用子域同属 `.example.com`，iframe 里主站 cookie 和预览票据 cookie 都能正常带上，Safari 也不会拦截。各渠道允许 admin origin 嵌入：dev 和 beta 用 `frame-ancestors 'self' https://admin.<base>`；prod 也放行 admin origin，用户访问时不受影响。
 - **票据写入**：iframe 先访问 `https://{appId}--dev.<base>/__platform/preview-auth?t=<签名票据>`，在这里写入 `__Host-app_preview` cookie，然后 302 到应用首页。
-- 每个活跃应用起一个 Vite dev server（middlewareMode，node_modules 软链镜像里预装的依赖）。`{appId}--dev` 的请求由 server 代理 HTTP 和 HMR WebSocket；空闲 30 分钟回收。
+- `{appId}--dev` 的请求由 server 直接返回草稿文件，没有 dev server、没有 HMR，也没有需要回收的进程。
 - 预览访问：后台签发预览票据，写入 `__Host-` cookie，24h 有效。`--beta` 共用这套票据，二维码里带短期票据。
 - 预览环境的 SDK 会回传 console 错误、未处理的 rejection、接口失败，供 IDE 展示和 `get_runtime_errors` 使用。
-- 服务端不执行生成的代码：没有 SSR，构建配置和插件由平台锁定，构建只是纯转换。
+- 服务端不执行生成的代码：没有 SSR，也没有构建和打包，源码原样返回。
 
 ## 10. 构建与发布
-1. **测试版**：build-worker（BullMQ）对快照执行 `vite build`，然后依次跑类型检查、app-guard、体积检查、manifest 变更检查（新能力是否已授权、ACL 是否放宽），最后由小模型写变更摘要。产物写入 `builds/{appId}/{buildId}/`，切换 `--beta` 指针。
+1. **测试版**：build-worker 对快照执行校验（app-guard、业务接口核对、JS 语法、体积、manifest 变更检查），最后由小模型写变更摘要。**没有编译产物**：校验通过后直接把快照的文件清单记为构建文件，切换 `--beta` 指针。
 2. **上线**：负责人在审批页查看报告并扫码测试，确认后依次：应用 schema 增量到 prod 库 → 切换 prod 指针 →（有 CDN 时）刷新 index.html。
 3. 回滚：切换到历史 release。下线和定时上下线在后台配置。飞书机器人推送通知。
 
@@ -252,22 +252,22 @@ platform.app / platform.env                    // appId、channel、inApp、os
 | 应用之间互相请求 / CSRF | 自定义头 + 拒绝预检 + Sec-Fetch-Site；业务后端集中校验 Origin（SameSite 无效） |
 | 伪造登录框钓鱼 | 内部创建者 + 审批 + 扫描（禁止出现手机号 / 验证码类输入框的可疑模式）；残余风险可接受 |
 | 数据越权 / NoSQL 注入 | 服务端注入 owner 条件、ACL 预设、ajv 校验、操作符白名单 |
-| 生成代码危害服务端 | 不执行生成代码；构建配置和依赖由平台锁定 |
+| 生成代码危害服务端 | 不执行生成代码；没有构建配置和依赖，源码原样返回 |
 | 成本 / 滥用 | 多级限流和配额；AI 必须登录；上传限类型和大小 |
 | 开放重定向（兜底登录 redirect_to） | 只传当前页 URL；跳转目标由主站登录服务校验，并限制在 `GUARD_ALLOWED_REDIRECT_HOSTS` 配置的白名单内 |
 
 ## 14. 可观测与部署
 - SDK 遥测：JS 错误、接口错误和耗时、Web Vitals、PV，用 sendBeacon 上报；后台按应用展示，用 sourcemap 还原错误栈。
 - 服务端：pino 日志 + Prometheus 指标；飞书告警。
-- K8s：`server-api`（配 HPA）、`preview`（StatefulSet，preStop 时清理 Redis 路由，WebSocket 空闲超时 ≥ 1h）、`build-worker`；nginx ingress 配置与本地同一份模板。
+- K8s：`server-api`（配 HPA）、`build-worker`；预览没有独立进程，不需要 StatefulSet。nginx ingress 配置与本地同一份模板。
 
 ## 15. 仓库结构（pnpm monorepo）
 ```
 apps/admin-web        后台 + 对话式 IDE
 apps/server           Node.js（Fastify）
-  src/modules/{admin,agent,preview,build,gateway,host,telemetry}
+  src/modules/{admin,agent,build,gateway,host}
 packages/sdk          运行时 SDK → 构建产物 sdk.js（server 托管）+ platform.d.ts
-packages/app-template Vue3+Vant+UnoCSS 模板、锁定的 vite 配置、依赖白名单
+packages/app-template 纯 HTML 模板、平台前端运行时、Tailwind 运行时
 packages/shared       manifest schema、查询 DSL、事件协议类型
 packages/app-guard    扫描规则
 packages/agent-docs   给模型看的文档
@@ -287,8 +287,8 @@ Makefile  scripts/
 |---|---|
 | M0（1 周） | monorepo、部署 Dockerfile、nginx 模板、mkcert、server 骨架、飞书登录（含本地跳过）、应用 CRUD、app-host 托管手工产物 + CSP |
 | M1（2 周） | SDK（auth/me、401 队列、三种登录方式、弹窗）、gateway（db/kv/files）；手写 demo 应用在浏览器和 App 跑通全链路 |
-| M2（2–3 周） | Agent 服务 + 事件协议、对话式 IDE、预览 + HMR、运行时错误回传、快照回滚 |
-| M3（1–2 周） | 构建、检查、测试版、审批上线、回滚、数据台 |
+| M2（2–3 周） | Agent 服务 + 事件协议、对话式 IDE、预览、运行时错误回传、快照回滚 |
+| M3（1–2 周） | 校验、测试版、审批上线、回滚、数据台 |
 | M4（1–2 周） | 业务接口目录 + CSP + `biz.request` |
 | M5（1 周） | 遥测、告警、配额、审计、安全自测 |
 
