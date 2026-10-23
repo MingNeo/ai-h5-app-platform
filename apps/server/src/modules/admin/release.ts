@@ -8,13 +8,13 @@ import { err } from '../../lib/errors'
 import { ok, parseBody } from '../../lib/http'
 import { col } from '../../lib/mongo'
 import { compareManifest, release, requestBuild } from '../build/service'
-import { requireAppRole } from './auth'
+import { requirePerm } from './auth'
 
 export function registerReleaseRoutes(app: FastifyInstance) {
   // ---------- 预览 ----------
   app.post('/admin-api/apps/:appId/preview-url', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'viewer')
+    const { user } = await requirePerm(req, appId, 'console.view')
     const body = parseBody(z.object({
       channel: z.enum(['dev', 'beta', 'prod']).default('dev'),
       identity: z.enum(['self', 'guest', 'test']).default('self'),
@@ -31,14 +31,14 @@ export function registerReleaseRoutes(app: FastifyInstance) {
 
   app.get('/admin-api/apps/:appId/dev-errors', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'console.view')
     const since = Number((req.query as { since?: string }).since ?? 0)
     return ok(await getDevErrors(appId, since, 100))
   })
 
   app.delete('/admin-api/apps/:appId/dev-errors', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'developer')
+    await requirePerm(req, appId, 'app.edit')
     await clearDevErrors(appId)
     return ok({})
   })
@@ -46,7 +46,7 @@ export function registerReleaseRoutes(app: FastifyInstance) {
   // ---------- 构建 / 发布 ----------
   app.get('/admin-api/apps/:appId/builds', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'console.view')
     const builds = await col.builds.find({ appId }, { projection: { files: 0 } }).sort({ createdAt: -1 }).limit(30).toArray()
     const releases = await col.releases.find({ appId }).sort({ createdAt: -1 }).limit(30).toArray()
     const ids = [...new Set([...builds.map(b => b.createdBy), ...releases.map(r => r.createdBy)])]
@@ -60,14 +60,14 @@ export function registerReleaseRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/builds', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const b = await requestBuild(appId, user._id)
     return ok({ id: b._id, status: b.status })
   })
 
   app.get('/admin-api/apps/:appId/builds/:buildId', async (req) => {
     const { appId, buildId } = req.params as { appId: string, buildId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'console.view')
     const b = await col.builds.findOne({ _id: buildId, appId }, { projection: { files: 0 } })
     if (!b)
       throw err.notFound('构建不存在')
@@ -78,7 +78,7 @@ export function registerReleaseRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/release', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'owner')
+    const { user } = await requirePerm(req, appId, 'app.publish')
     const body = parseBody(z.object({ buildId: z.string(), note: z.string().max(200).default(''), confirmed: z.boolean().default(false) }), req.body)
     const b = await col.builds.findOne({ _id: body.buildId, appId })
     if (!b || b.status !== 'success')
@@ -92,7 +92,7 @@ export function registerReleaseRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/rollback', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'owner')
+    const { user } = await requirePerm(req, appId, 'app.publish')
     const { releaseId } = parseBody(z.object({ releaseId: z.string() }), req.body)
     const r = await col.releases.findOne({ _id: releaseId, appId })
     if (!r)

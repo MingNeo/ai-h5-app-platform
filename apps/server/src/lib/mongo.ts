@@ -1,8 +1,8 @@
-import type { AppManifest, Attachment, BizApiSpec, CheckIssue, FileChange, TurnStatus, TurnUsage } from '@app-platform/shared'
+import type { AppManifest, AppPerm, AppRole, Attachment, BizApiSpec, CheckIssue, FileChange, TurnStatus, TurnUsage } from '@app-platform/shared'
 import { type Collection, type Db, MongoClient } from 'mongodb'
 import { config } from '../config'
 
-export type AppRole = 'owner' | 'developer' | 'viewer'
+export type { AppRole }
 
 export interface AdminUserDoc {
   _id: string
@@ -36,6 +36,8 @@ export interface MemberDoc {
   appId: string
   userId: string
   role: AppRole
+  /** 显式权限覆盖；为空时按角色包推导 */
+  perms?: AppPerm[] | null
   createdAt: Date
 }
 

@@ -10,7 +10,7 @@ import { ok, parseBody } from '../../lib/http'
 import { appCollection } from '../../lib/mongo'
 import { newId } from '../../lib/tokens'
 import { ensureIndexes } from '../gateway/data'
-import { requireAppRole } from './auth'
+import { requireDataRead, requirePerm } from './auth'
 
 const envSchema = z.enum(['dev', 'prod'])
 const ajv = new Ajv({ allErrors: true, strict: false })
@@ -35,8 +35,8 @@ function csvCell(v: unknown) {
 export function registerDataRoutes(app: FastifyInstance) {
   app.get('/admin-api/apps/:appId/data/:env/collections', async (req) => {
     const { appId, env } = req.params as { appId: string, env: string }
-    await requireAppRole(req, appId, 'viewer')
     const e = envSchema.parse(env)
+    await requirePerm(req, appId, 'data.read')
     const cols = await collectionsFor(appId, e)
     const result = await Promise.all(Object.entries(cols).map(async ([name, def]) => ({
       name,
@@ -51,8 +51,8 @@ export function registerDataRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/data/:env/:col/query', async (req) => {
     const { appId, env, col } = req.params as { appId: string, env: string, col: string }
-    await requireAppRole(req, appId, 'viewer')
     const e = envSchema.parse(env)
+    await requireDataRead(req, appId, e, col)
     const collectionDef = await defOf(appId, e, col)
     const body = (req.body ?? {}) as { search?: { value?: unknown, fields?: unknown } }
     let q
@@ -87,7 +87,7 @@ export function registerDataRoutes(app: FastifyInstance) {
   app.post('/admin-api/apps/:appId/data/:env/:col', async (req) => {
     const { appId, env, col } = req.params as { appId: string, env: string, col: string }
     const e = envSchema.parse(env)
-    const { user } = await requireAppRole(req, appId, e === 'prod' ? 'owner' : 'developer')
+    const { user } = await requirePerm(req, appId, e === 'prod' ? 'data.write.prod' : 'data.write.dev')
     const def = await defOf(appId, e, col)
     const { data } = parseBody(z.object({ data: z.record(z.string(), z.unknown()) }), req.body)
     const v = ajv.compile(fieldsToJsonSchema(def.fields))
@@ -111,7 +111,7 @@ export function registerDataRoutes(app: FastifyInstance) {
   app.patch('/admin-api/apps/:appId/data/:env/:col/:id', async (req) => {
     const { appId, env, col, id } = req.params as { appId: string, env: string, col: string, id: string }
     const e = envSchema.parse(env)
-    const { user } = await requireAppRole(req, appId, e === 'prod' ? 'owner' : 'developer')
+    const { user } = await requirePerm(req, appId, e === 'prod' ? 'data.write.prod' : 'data.write.dev')
     const def = await defOf(appId, e, col)
     const { data } = parseBody(z.object({ data: z.record(z.string(), z.unknown()) }), req.body)
     const c = appCollection<any>(appId, e, col)
@@ -131,7 +131,7 @@ export function registerDataRoutes(app: FastifyInstance) {
   app.delete('/admin-api/apps/:appId/data/:env/:col/:id', async (req) => {
     const { appId, env, col, id } = req.params as { appId: string, env: string, col: string, id: string }
     const e = envSchema.parse(env)
-    const { user } = await requireAppRole(req, appId, e === 'prod' ? 'owner' : 'developer')
+    const { user } = await requirePerm(req, appId, e === 'prod' ? 'data.write.prod' : 'data.write.dev')
     await defOf(appId, e, col)
     await appCollection<any>(appId, e, col).deleteOne({ _id: id })
     audit(user._id, 'data.delete', appId, { env: e, col, id })
@@ -140,8 +140,8 @@ export function registerDataRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/data/:env/:col/group', async (req) => {
     const { appId, env, col } = req.params as { appId: string, env: string, col: string }
-    await requireAppRole(req, appId, 'viewer')
     const e = envSchema.parse(env)
+    await requireDataRead(req, appId, e, col)
     const def = await defOf(appId, e, col)
     const input = (req.body ?? {}) as { field?: unknown, where?: unknown, limit?: unknown }
     const field = typeof input.field === 'string' ? input.field : ''
@@ -168,8 +168,8 @@ export function registerDataRoutes(app: FastifyInstance) {
   /** 计数 / 求和 / 平均；带 timeField 时按天或小时出序列，供折线图 */
   app.post('/admin-api/apps/:appId/data/:env/:col/stats', async (req) => {
     const { appId, env, col } = req.params as { appId: string, env: string, col: string }
-    await requireAppRole(req, appId, 'viewer')
     const e = envSchema.parse(env)
+    await requireDataRead(req, appId, e, col)
     const def = await defOf(appId, e, col)
     const input = (req.body ?? {}) as { op?: unknown, field?: unknown, where?: unknown, timeField?: unknown, interval?: unknown }
     const op = ['count', 'sum', 'avg'].includes(String(input.op)) ? String(input.op) as 'count' | 'sum' | 'avg' : 'count'
@@ -208,7 +208,7 @@ export function registerDataRoutes(app: FastifyInstance) {
   app.get('/admin-api/apps/:appId/data/:env/:col/export', async (req, reply) => {
     const { appId, env, col } = req.params as { appId: string, env: string, col: string }
     const e = envSchema.parse(env)
-    const { user } = await requireAppRole(req, appId, 'owner')
+    const { user } = await requirePerm(req, appId, 'data.export')
     const def = await defOf(appId, e, col)
     const fields = ['_id', '_owner', ...Object.keys(def.fields), '_createdAt']
     const docs = await appCollection(appId, e, col).find().sort({ _createdAt: 1 }).limit(50_000).toArray()
@@ -223,7 +223,7 @@ export function registerDataRoutes(app: FastifyInstance) {
   /** 把 dev 的 readonly 集合数据同步到 prod（覆盖） */
   app.post('/admin-api/apps/:appId/data/sync-readonly', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'owner')
+    const { user } = await requirePerm(req, appId, 'data.export', 'data.write.prod')
     const { collection } = parseBody(z.object({ collection: z.string() }), req.body)
     const prodDef = await defOf(appId, 'prod', collection)
     if (prodDef.acl !== 'readonly')
@@ -242,7 +242,7 @@ export function registerDataRoutes(app: FastifyInstance) {
   app.put('/admin-api/apps/:appId/data/:env/kv/:key', async (req) => {
     const { appId, env, key } = req.params as { appId: string, env: string, key: string }
     const e = envSchema.parse(env)
-    const { user } = await requireAppRole(req, appId, e === 'prod' ? 'owner' : 'developer')
+    const { user } = await requirePerm(req, appId, e === 'prod' ? 'data.write.prod' : 'data.write.dev')
     if (!/^[\w.:-]{1,64}$/.test(key))
       throw err.invalid('key 只能包含字母、数字和 _ . : -')
     const { value } = parseBody(z.object({ value: z.unknown() }), req.body)
@@ -254,7 +254,7 @@ export function registerDataRoutes(app: FastifyInstance) {
   app.delete('/admin-api/apps/:appId/data/:env/kv/:key', async (req) => {
     const { appId, env, key } = req.params as { appId: string, env: string, key: string }
     const e = envSchema.parse(env)
-    const { user } = await requireAppRole(req, appId, e === 'prod' ? 'owner' : 'developer')
+    const { user } = await requirePerm(req, appId, e === 'prod' ? 'data.write.prod' : 'data.write.dev')
     await appCollection<any>(appId, e, '_kv_app').deleteOne({ _id: key })
     audit(user._id, 'kv.delete', appId, { env: e, key })
     return ok({})

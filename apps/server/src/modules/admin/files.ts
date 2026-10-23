@@ -7,7 +7,7 @@ import { err } from '../../lib/errors'
 import { ok, parseBody } from '../../lib/http'
 import { TEXT_EXT } from '../../lib/mime'
 import { col, type SnapshotFile } from '../../lib/mongo'
-import { requireAppRole } from './auth'
+import { requirePerm } from './auth'
 
 function encode(path: string, data: Buffer) {
   return TEXT_EXT.test(path) ? { encoding: 'utf8' as const, content: data.toString('utf8') } : { encoding: 'base64' as const, content: data.toString('base64') }
@@ -25,7 +25,7 @@ async function fileAt(appId: string, ref: string, path: string): Promise<Buffer 
 export function registerFileRoutes(app: FastifyInstance) {
   app.get('/admin-api/apps/:appId/files', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'app.edit')
     const files = await listDraft(appId)
     const users = await col.adminUsers.find({ _id: { $in: [...new Set(files.map(f => f.updatedBy))] } }, { projection: { name: 1 } }).toArray()
     const names = new Map(users.map(u => [u._id, u.name]))
@@ -36,7 +36,7 @@ export function registerFileRoutes(app: FastifyInstance) {
 
   app.get('/admin-api/apps/:appId/files/content', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'app.edit')
     const { path, ref } = req.query as { path?: string, ref?: string }
     if (!path)
       throw err.invalid('缺少 path')
@@ -55,7 +55,7 @@ export function registerFileRoutes(app: FastifyInstance) {
 
   app.put('/admin-api/apps/:appId/files/content', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const body = parseBody(z.object({
       path: z.string(),
       content: z.string(),
@@ -69,7 +69,7 @@ export function registerFileRoutes(app: FastifyInstance) {
 
   app.delete('/admin-api/apps/:appId/files', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const { path } = req.query as { path?: string }
     if (!path)
       throw err.invalid('缺少 path')
@@ -79,7 +79,7 @@ export function registerFileRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/files/move', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const body = parseBody(z.object({ from: z.string(), to: z.string() }), req.body)
     await moveDraft(appId, body.from, body.to, { userId: user._id })
     return ok({})
@@ -88,7 +88,7 @@ export function registerFileRoutes(app: FastifyInstance) {
   /** 上传图片等素材到 public/ 或 src/assets/ */
   app.post('/admin-api/apps/:appId/files/upload', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const saved: string[] = []
     let dir = 'public'
     for await (const part of req.parts({ limits: { fileSize: 2 * 1024 * 1024, files: 10 } })) {
@@ -112,7 +112,7 @@ export function registerFileRoutes(app: FastifyInstance) {
   // ---------- 版本快照 ----------
   app.get('/admin-api/apps/:appId/snapshots', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'app.edit')
     const list = await col.snapshots.find({ appId, kind: { $ne: 'pre' } }, { projection: { files: 0 } }).sort({ createdAt: -1 }).limit(100).toArray()
     const users = await col.adminUsers.find({ _id: { $in: [...new Set(list.map(s => s.createdBy))] } }, { projection: { name: 1 } }).toArray()
     const names = new Map(users.map(u => [u._id, u.name]))
@@ -121,7 +121,7 @@ export function registerFileRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/snapshots', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const { message } = parseBody(z.object({ message: z.string().max(100).default('手动保存') }), req.body)
     const s = await createSnapshot(appId, { kind: 'manual', message, userId: user._id })
     return ok({ id: s._id })
@@ -129,7 +129,7 @@ export function registerFileRoutes(app: FastifyInstance) {
 
   app.post('/admin-api/apps/:appId/snapshots/:id/restore', async (req) => {
     const { appId, id } = req.params as { appId: string, id: string }
-    const { user } = await requireAppRole(req, appId, 'developer')
+    const { user } = await requirePerm(req, appId, 'app.edit')
     const snap = await getSnapshot(appId, id)
     const changes = await restoreSnapshot(appId, snap, { userId: user._id })
     const s = await createSnapshot(appId, { kind: 'rollback', message: `回滚到 ${snap.message}（${snap.createdAt.toLocaleString('zh-CN')}）`, userId: user._id })
@@ -139,7 +139,7 @@ export function registerFileRoutes(app: FastifyInstance) {
 
   app.get('/admin-api/apps/:appId/diff', async (req) => {
     const { appId } = req.params as { appId: string }
-    await requireAppRole(req, appId, 'viewer')
+    await requirePerm(req, appId, 'app.edit')
     const { from, to, path } = req.query as { from?: string, to?: string, path?: string }
     if (!from || !path)
       throw err.invalid('缺少参数')

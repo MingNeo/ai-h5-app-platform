@@ -1,16 +1,17 @@
+import { APP_PERMS, type AppPerm, type AppRole, PERM_LABELS, permsOf } from '@app-platform/shared'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { config } from '../../config'
+import { adminViewCollections } from '../../core/admin-view'
 import { audit } from '../../lib/audit'
 import { err } from '../../lib/errors'
 import { ok, parseBody } from '../../lib/http'
-import { type AdminUserDoc, type AppRole, col } from '../../lib/mongo'
+import { type AdminUserDoc, type AppDoc, col } from '../../lib/mongo'
 import { store } from '../../lib/store'
 import { newId, randomToken, signToken, verifyToken } from '../../lib/tokens'
 
 const SESSION_TTL = 7 * 86400
 const TICKET_TTL = 60
-const ROLE_RANK: Record<AppRole, number> = { viewer: 1, developer: 2, owner: 3 }
 
 /**
  * 后台与应用同源，**不能使用 cookie 会话**：应用页面发起的同源请求会自动带上后台 cookie，
@@ -55,22 +56,62 @@ export function requirePlatformAdmin(req: FastifyRequest) {
   return u
 }
 
-export async function appRole(user: AdminUserDoc, appId: string): Promise<AppRole | null> {
-  if (user.isPlatformAdmin)
-    return 'owner'
-  const m = await col.members.findOne({ appId, userId: user._id })
-  return m?.role ?? null
+export interface AppAccess {
+  app: AppDoc
+  role: AppRole
+  perms: Set<AppPerm>
 }
 
-export async function requireAppRole(req: FastifyRequest, appId: string, min: AppRole) {
+/** 平台管理员对所有应用等价于 owner，权限全开 */
+export async function appAccess(user: AdminUserDoc, appId: string): Promise<{ role: AppRole, perms: Set<AppPerm> } | null> {
+  if (user.isPlatformAdmin)
+    return { role: 'owner', perms: new Set<AppPerm>(APP_PERMS) }
+  const m = await col.members.findOne({ appId, userId: user._id })
+  if (!m)
+    return null
+  return { role: m.role, perms: permsOf(m.role, m.perms) }
+}
+
+function denied(perm: AppPerm) {
+  return err.forbidden(`需要「${PERM_LABELS[perm]}」权限`)
+}
+
+/** 鉴权的唯一入口：按权限判断，不按角色等级比较 */
+export async function requirePerm(req: FastifyRequest, appId: string, ...need: AppPerm[]) {
   const user = requireAdmin(req)
   const app = await col.apps.findOne({ _id: appId, status: { $ne: 'deleted' } })
   if (!app)
     throw err.notFound('应用不存在')
-  const role = await appRole(user, appId)
-  if (!role || ROLE_RANK[role] < ROLE_RANK[min])
-    throw err.forbidden(min === 'owner' ? '需要应用负责人权限' : '没有该应用的权限')
-  return { user, app, role }
+  const access = await appAccess(user, appId)
+  if (!access)
+    throw err.forbidden('没有该应用的权限')
+  for (const p of need) {
+    if (!access.perms.has(p))
+      throw denied(p)
+  }
+  return { user, app, role: access.role, perms: access.perms } satisfies { user: AdminUserDoc, app: AppDoc, role: AppRole, perms: Set<AppPerm> }
+}
+
+/**
+ * 读数据：有 data.read 可读任意已声明集合；
+ * 只有 console.view 时，仅能读后台视图（admin.json）里引用到的集合。
+ */
+export async function requireDataRead(req: FastifyRequest, appId: string, env: 'dev' | 'prod', colName: string) {
+  const user = requireAdmin(req)
+  const app = await col.apps.findOne({ _id: appId, status: { $ne: 'deleted' } })
+  if (!app)
+    throw err.notFound('应用不存在')
+  const access = await appAccess(user, appId)
+  if (!access)
+    throw err.forbidden('没有该应用的权限')
+  if (!access.perms.has('data.read')) {
+    if (!access.perms.has('console.view'))
+      throw denied('data.read')
+    const declared = await adminViewCollections(appId, env)
+    if (!declared.has(colName))
+      throw err.forbidden(`需要「${PERM_LABELS['data.read']}」权限才能读取集合 ${colName}`)
+  }
+  return { user, app, role: access.role, perms: access.perms }
 }
 
 function meView(u: AdminUserDoc) {
@@ -143,10 +184,21 @@ export function registerAdminAuth(app: FastifyInstance) {
     req.admin = (await loadAdmin(req)) ?? undefined
   })
 
-  app.get('/admin-api/auth/options', async () => ok({
-    feishu: Boolean(config.admin.feishuAppId),
-    devBypass: config.admin.devBypass,
-  }))
+  app.get('/admin-api/auth/options', async () => {
+    // 本地免登时把已有账号列出来，方便切身份（也用于测不同应用角色）
+    const devUsers = config.admin.devBypass
+      ? (await col.adminUsers.find({}, { projection: { name: 1, email: 1, avatar: 1, isPlatformAdmin: 1, lastLoginAt: 1 } })
+          .sort({ lastLoginAt: -1 })
+          .limit(50)
+          .toArray())
+          .map(u => ({ id: u._id, name: u.name, email: u.email, avatar: u.avatar, isPlatformAdmin: u.isPlatformAdmin }))
+      : []
+    return ok({
+      feishu: Boolean(config.admin.feishuAppId),
+      devBypass: config.admin.devBypass,
+      devUsers,
+    })
+  })
 
   // 前端展示用的平台信息（域名后缀等），不涉及敏感数据
   app.get('/admin-api/meta', async () => ok({ baseDomain: config.baseDomain }))
@@ -166,12 +218,24 @@ export function registerAdminAuth(app: FastifyInstance) {
   app.post('/admin-api/auth/dev-login', async (req) => {
     if (!config.admin.devBypass)
       throw err.forbidden('未开启本地免登（DEV_ADMIN_BYPASS）')
-    const name = String((req.body as { name?: string })?.name || '本地开发者').slice(0, 20)
-    const openId = `dev:${name}`
-    const id = await upsertUser({ openId, name, avatar: '', email: '' })
-    await col.adminUsers.updateOne({ _id: id }, { $set: { isPlatformAdmin: true } })
+    const body = (req.body ?? {}) as { name?: string, userId?: string }
+    let id: string
+    if (body.userId) {
+      // 选已有账号：保留它真实的平台/应用权限，方便本地切身份验证权限
+      const existing = await col.adminUsers.findOne({ _id: body.userId })
+      if (!existing)
+        throw err.notFound('用户不存在')
+      id = existing._id
+      await col.adminUsers.updateOne({ _id: id }, { $set: { lastLoginAt: new Date() } })
+    }
+    else {
+      const name = String(body.name || '本地开发者').slice(0, 20)
+      const openId = `dev:${name}`
+      id = await upsertUser({ openId, name, avatar: '', email: '' })
+      await col.adminUsers.updateOne({ _id: id }, { $set: { isPlatformAdmin: true } })
+    }
     const token = await createSession(id)
-    audit(id, 'admin.login', undefined, { via: 'dev' })
+    audit(id, 'admin.login', undefined, { via: 'dev', ...(body.userId ? { asUser: body.userId } : {}) })
     const user = await col.adminUsers.findOne({ _id: id })
     return ok({ token, user: user ? meView(user) : null })
   })

@@ -66,7 +66,8 @@ const doc = ref('')
 
 const formDialog = ref<{ key: string, collection: string, fields: string[], id?: string, model: Record<string, any>, json: Record<string, string> } | null>(null)
 
-const canEdit = computed(() => store.canEdit())
+const canEditView = computed(() => store.can('app.edit'))
+const canWriteData = computed(() => env.value === 'dev' ? store.can('data.write.dev') : store.can('data.write.prod'))
 const pages = computed(() => view.value?.pages ?? [])
 const currentBlocks = computed(() => pages.value[activePage.value]?.blocks ?? [])
 
@@ -448,10 +449,10 @@ onMounted(load)
       <el-button size="small" @click="loadDoc">
         配置说明
       </el-button>
-      <el-button size="small" type="primary" plain :disabled="!canEdit" @click="openAi">
+      <el-button size="small" type="primary" plain :disabled="!canEditView" @click="openAi">
         AI 生成
       </el-button>
-      <el-button size="small" :disabled="!canEdit" @click="openEditor">
+      <el-button size="small" :disabled="!canEditView" @click="openEditor">
         {{ raw ? '编辑 JSON' : '创建配置' }}
       </el-button>
     </div>
@@ -466,10 +467,10 @@ onMounted(load)
       <div class="text-[var(--muted)] mb-3">
         还没有后台视图配置。写一句话让 AI 生成，或手写 admin.json。
       </div>
-      <el-button size="small" type="primary" :disabled="!canEdit" @click="openAi">
+      <el-button size="small" type="primary" :disabled="!canEditView" @click="openAi">
         AI 生成
       </el-button>
-      <el-button size="small" :disabled="!canEdit" @click="openEditor">
+      <el-button size="small" :disabled="!canEditView" @click="openEditor">
         创建配置
       </el-button>
     </div>
@@ -546,10 +547,10 @@ onMounted(load)
               <span class="font-500">{{ b.title || b.collection }}</span>
               <span class="text-12px text-[var(--muted)]">共 {{ pageTable(i)!.total }} 条</span>
               <span class="flex-1" />
-              <el-button v-if="actionsOf(b).create" size="small" :disabled="!canEdit" @click="openForm(b)">
+              <el-button v-if="actionsOf(b).create" size="small" :disabled="!canWriteData" @click="openForm(b)">
                 新增
               </el-button>
-              <el-button size="small" @click="exportCsv(b.collection!)">
+              <el-button v-if="store.can('data.export')" size="small" @click="exportCsv(b.collection!)">
                 导出 CSV
               </el-button>
             </div>
@@ -622,10 +623,10 @@ onMounted(load)
                   <el-button v-if="actionsOf(b).detail" size="small" link type="primary" @click="openDetail(b, row)">
                     详情
                   </el-button>
-                  <el-button v-if="actionsOf(b).edit" size="small" link type="primary" :disabled="!canEdit" @click="openForm(b, row)">
+                  <el-button v-if="actionsOf(b).edit" size="small" link type="primary" :disabled="!canWriteData" @click="openForm(b, row)">
                     编辑
                   </el-button>
-                  <el-button v-if="actionsOf(b).delete" size="small" link type="danger" :disabled="!canEdit" @click="removeRow(b, row)">
+                  <el-button v-if="actionsOf(b).delete" size="small" link type="danger" :disabled="!canWriteData" @click="removeRow(b, row)">
                     删除
                   </el-button>
                 </template>

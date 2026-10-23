@@ -25,7 +25,7 @@
 | `https://apps.example.com/a/{appId}--dev/` | 实时预览 |
 | `https://apps.example.com/__platform/` | 平台运行时与 SDK |
 
-一个 server 进程、一个 nginx / Ingress 规则、一张普通证书。新增应用不需要任何运维动作。操作说明见 [deploy/nginx/README.md](deploy/nginx/README.md)。
+一个 server 进程、一个 nginx / Ingress 规则、一张普通证书。新增应用不需要任何运维动作。完整部署步骤见 [deploy/README.md](deploy/README.md)，反向代理配置见 [deploy/nginx/README.md](deploy/nginx/README.md)。
 
 ## 本地启动
 

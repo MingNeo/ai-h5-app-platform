@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { AppPerm } from '@app-platform/shared'
 import { computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '../stores/app'
@@ -8,17 +9,33 @@ const store = useAppStore()
 const route = useRoute()
 const router = useRouter()
 
-const tabs = [
-  { path: 'develop', label: '开发' },
-  { path: 'release', label: '发布' },
-  { path: 'data', label: '数据' },
-  { path: 'console', label: '后台视图' },
-  { path: 'grants', label: '能力' },
-  { path: 'monitor', label: '监控' },
-  { path: 'members', label: '成员' },
-  { path: 'settings', label: '设置' },
+interface Tab { path: string, label: string, need?: AppPerm[], any?: AppPerm[] }
+
+const tabs: Tab[] = [
+  { path: 'develop', label: '开发', need: ['app.edit'] },
+  { path: 'release', label: '发布', any: ['app.publish', 'app.edit'] },
+  { path: 'data', label: '数据', need: ['data.read'] },
+  { path: 'console', label: '后台视图', need: ['console.view'] },
+  { path: 'grants', label: '能力', need: ['app.edit'] },
+  { path: 'monitor', label: '监控', need: ['console.view'] },
+  { path: 'members', label: '成员', need: ['app.manage'] },
+  { path: 'settings', label: '设置', need: ['app.edit'] },
 ]
+
+const allowed = (t: Tab) => (t.any ? store.canAny(...t.any) : store.can(...(t.need ?? [])))
+const visibleTabs = computed(() => tabs.filter(allowed))
 const active = computed(() => route.path.split('/').pop())
+
+// 直接输 URL 进入无权限的页时，跳到第一个可见页（接口侧也会 403）
+watch([() => store.app, active], () => {
+  if (!store.app)
+    return
+  const current = tabs.find(t => t.path === active.value)
+  if (!current || allowed(current))
+    return
+  const first = visibleTabs.value[0]
+  void router.replace(first ? `/apps/${props.appId}/${first.path}` : '/')
+})
 
 watch(() => props.appId, async (id) => {
   store.app = null
@@ -49,7 +66,7 @@ watch(() => props.appId, async (id) => {
       </div>
       <div class="flex-1 flex justify-center gap-1">
         <el-button
-          v-for="t in tabs" :key="t.path"
+          v-for="t in visibleTabs" :key="t.path"
           :type="active === t.path ? 'primary' : 'default'" :text="active !== t.path" :plain="active === t.path"
           @click="router.push(`/apps/${appId}/${t.path}`)"
         >
