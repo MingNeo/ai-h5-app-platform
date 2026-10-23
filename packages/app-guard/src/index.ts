@@ -30,9 +30,6 @@ interface Rule {
 
 const CODE_EXT = ['.ts', '.js', '.mjs', '.vue', '.tsx', '.jsx']
 
-/** 常见前端框架/UI 库：平台不支持，给出明确提示而不是“不在白名单” */
-const FRAMEWORK_PACKAGES = new Set(['vue', 'vue-router', 'pinia', 'vant', '@vueuse/core', 'react', 'react-dom', 'preact', 'lit', 'svelte', 'element-plus', 'ant-design-vue'])
-
 const RULES: Rule[] = [
   { re: /\beval\s*\(/, severity: 'error', message: '禁止使用 eval' },
   { re: /\bnew\s+Function\s*\(/, severity: 'error', message: '禁止使用 new Function' },
@@ -147,10 +144,6 @@ export function scanApp(files: GuardFile[], opts: GuardOptions): CheckIssue[] {
       continue
     }
     const ext = extOf(f.path)
-    if (ext === '.vue') {
-      issues.push({ source: 'guard', severity: 'error', file: f.path, message: '平台不支持 .vue 文件：应用是纯 HTML + 原生 JS 模块，没有编译步骤' })
-      continue
-    }
     if (!CODE_EXT.includes(ext) && ext !== '.html')
       continue
     const code = stripComments(f.content)
@@ -174,13 +167,7 @@ export function scanApp(files: GuardFile[], opts: GuardOptions): CheckIssue[] {
         let m: RegExpExecArray | null
         while ((m = re.exec(code))) {
           const spec = m[1]!
-          if (spec.startsWith('.')) {
-            // 浏览器原生 ESM 不做扩展名补全，相对导入必须写全路径
-            if (!/\.[a-z0-9]+$/i.test(spec))
-              issues.push({ source: 'guard', severity: 'error', file: f.path, line: lineOf(code, m.index), message: `相对导入必须带扩展名：${spec} → ${spec}.js` })
-            continue
-          }
-          if (spec.startsWith('/') || spec.startsWith('@/') || spec.startsWith('virtual:'))
+          if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('@/') || spec.startsWith('virtual:'))
             continue
           if (/^(?:https?:)?\/\//.test(spec)) {
             issues.push({ source: 'guard', severity: 'error', file: f.path, line: lineOf(code, m.index), message: `禁止从外部地址导入：${spec}` })
@@ -196,8 +183,8 @@ export function scanApp(files: GuardFile[], opts: GuardOptions): CheckIssue[] {
             continue
           }
           if (!allowed.has(pkg)) {
-            const hint = FRAMEWORK_PACKAGES.has(pkg)
-              ? `平台不支持 ${pkg}：应用是纯 HTML + 原生 JS，没有编译和打包；组件用 sl-* 或自己写，工具函数用 /__platform/dom.js`
+            const hint = opts.optionalDependencies.includes(pkg)
+              ? `请先用 add_dependency 声明依赖 ${pkg}`
               : `依赖 ${pkg} 不在平台白名单内`
             issues.push({ source: 'guard', severity: 'error', file: f.path, line: lineOf(code, m.index), message: hint })
           }

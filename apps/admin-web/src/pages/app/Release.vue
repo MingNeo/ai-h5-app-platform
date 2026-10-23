@@ -96,7 +96,7 @@ async function rollback(r: Release) {
 }
 
 function statusTag(s: string) {
-  return ({ queued: ['info', '排队中'], running: ['warning', '校验中'], success: ['success', '成功'], failed: ['danger', '失败'] } as Record<string, [string, string]>)[s] ?? ['info', s]
+  return ({ queued: ['info', '排队中'], running: ['warning', '构建中'], success: ['success', '成功'], failed: ['danger', '失败'] } as Record<string, [string, string]>)[s] ?? ['info', s]
 }
 
 onMounted(() => {
@@ -123,7 +123,7 @@ onBeforeUnmount(() => clearInterval(timer))
           {{ inProgress ? '正在生成…' : '生成测试版' }}
         </el-button>
         <div class="text-12px text-[var(--muted)] mt-2">
-          自动执行安全扫描、业务接口核对、语法检查和变更分析
+          自动执行安全扫描、类型检查、构建和变更分析
         </div>
       </div>
       <div class="bg-white rounded-xl p-5 border border-[var(--border)] flex gap-3">

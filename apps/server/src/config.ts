@@ -100,7 +100,7 @@ export const config = {
   devHosts: list(env.DEV_HOSTS || (bool(env.DEV_ADMIN_BYPASS) ? 'localhost,127.0.0.1' : '')).map(h => h.toLowerCase()),
   /** 后台与应用同源：/admin、/admin-api */
   adminOrigin: `https://${baseDomain}`,
-  roles: new Set(list(env.ROLES || 'api,build')),
+  roles: new Set(list(env.ROLES || 'api,preview,build')),
 
   mongoUrl: env.MONGO_URL || 'mongodb://127.0.0.1:27017/app_platform',
   redisUrl: env.REDIS_URL || '',
@@ -180,6 +180,7 @@ export const config = {
     docBytes: 16 * 1024,
     writesPerMinutePerUser: num(env.WRITES_PER_MINUTE_PER_USER, 120),
     apiPerMinutePerIp: num(env.API_PER_MINUTE_PER_IP, 1200),
+    previewIdleMinutes: num(env.PREVIEW_IDLE_MINUTES, 30),
   },
 }
 

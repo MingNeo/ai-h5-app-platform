@@ -13,7 +13,7 @@ export interface FileChange {
 }
 
 export interface CheckIssue {
-  source: 'guard' | 'syntax' | 'build' | 'manifest' | 'runtime' | 'biz'
+  source: 'guard' | 'build' | 'typecheck' | 'manifest' | 'runtime' | 'biz'
   severity: 'error' | 'warning'
   message: string
   file?: string
@@ -64,6 +64,7 @@ export const TOOL_KIND: Record<string, 'read' | 'write' | 'check' | 'data' | 'pl
   edit_file: 'write',
   delete_file: 'write',
   move_file: 'write',
+  add_dependency: 'write',
   check: 'check',
   get_runtime_errors: 'check',
   db_query: 'data',

@@ -76,11 +76,11 @@ make dev      # HTTPS proxy（:443）+ server（:3000）+ admin-web（:5173）
 
 ## 应用技术栈
 
-生成的应用是**纯 HTML + 原生 ES 模块**：没有编译、没有打包、没有 npm 依赖。
+生成的应用是 **Vue 3 + Vite**：页面用 SFC（`.vue`），路由用 vue-router，组件库 Vant，样式用 UnoCSS。
 
-- 多页优先：每个页面可以是独立的完整 HTML，页面之间的跳转由应用自己决定
-- 预览和线上都直接返回源码，刷新页面即可看到改动
-- 原子类由浏览器端的 Tailwind v4 运行时生成；没有组件库，界面用原生标签 + Tailwind 组合
-- 平台提供 `/__platform/dom.js`、`/__platform/ui.js`、`/__platform/ui.css`，由 server 注入 `index.html`
-- 「构建」只做校验（manifest、安全扫描、业务接口核对、JS 语法），不产出构建物
-- 应用源码里的根路径引用（如 `/src/app.js`、`/logo.png`）在返回时自动补上 `/a/{appId}[--channel]/` 前缀；新代码建议直接写相对路径
+- 预览：server 为每个应用按需启动 Vite dev server，代理到 `/a/{appId}--dev/`，支持 HMR
+- 构建：Vite 打包成静态产物存进构建快照，测试版和线上版直接返回产物
+- 「构建」同时做校验（manifest、安全扫描、业务接口核对、编译错误），失败时给出可定位的错误
+- 单域名路径隔离：应用挂在 `/a/{appId}[--channel]/` 下，router base 由平台在 boot.js 里注入；产物里的根路径引用在返回时自动补前缀
+- 可用的依赖有白名单（vue、vue-router、vant、pinia 等），需要在 `manifest.json` 的 `dependencies` 里声明
+

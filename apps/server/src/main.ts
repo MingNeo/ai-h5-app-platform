@@ -5,6 +5,7 @@ import { closeMongo, connectMongo } from './lib/mongo'
 import { initStore, store } from './lib/store'
 import { recoverTurns } from './modules/agent/runner'
 import { startBuildWorker } from './modules/build/service'
+import { startPreviewReaper, stopAllPreviews } from './modules/preview/manager'
 
 async function main() {
   mkdirSync(config.dataDir, { recursive: true })
@@ -14,6 +15,8 @@ async function main() {
   await app.listen({ port: config.port, host: config.host })
   app.log.info(`平台服务已启动 :${config.port}，基础域名 ${config.baseDomain}，登录模式 ${config.auth.provider}，模型 ${config.llm.provider}`)
 
+  if (config.roles.has('preview'))
+    startPreviewReaper()
   if (config.roles.has('build'))
     await startBuildWorker()
   if (config.roles.has('api'))
@@ -23,6 +26,7 @@ async function main() {
     app.log.info(`收到 ${signal}，正在关闭`)
     const timer = setTimeout(() => process.exit(1), 10_000)
     await app.close().catch(() => {})
+    await stopAllPreviews()
     await store.close()
     await closeMongo()
     clearTimeout(timer)

@@ -151,7 +151,7 @@ export async function initDraft(appId: string, appName: string, userId: string) 
     }
     if (f.path === 'index.html')
       data = Buffer.from(data.toString().replace('<title>新应用</title>', `<title>${escapeHtml(appName)}</title>`))
-    if (f.path === 'src/pages/home.js')
+    if (f.path === 'src/pages/Home.vue')
       data = Buffer.from(data.toString().replace('新应用', escapeHtml(appName)))
     await writeDraft(appId, f.path, data, { userId, silent: true })
   }

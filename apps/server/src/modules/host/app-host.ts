@@ -1,8 +1,7 @@
-import { BOOT_SCRIPT, TAILWIND_SCRIPT } from '@app-platform/app-template'
+import { BOOT_SCRIPT } from '@app-platform/app-template'
 import { ADMIN_VIEW_FILE, appPath } from '@app-platform/shared'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { getApp, isWithinSchedule } from '../../core/apps'
-import { currentFiles } from '../../core/drafts'
 import { readPreviewClaims } from '../../core/preview-access'
 import { blobs } from '../../lib/blob'
 import { mimeOf } from '../../lib/mime'
@@ -13,26 +12,12 @@ import { placeholderPage } from './pages'
 const buildFileCache = new Map<string, Map<string, SnapshotFile>>()
 const rewriteCache = new Map<string, Buffer>()
 
-/** 平台自己的 head 标签；应用源码里不用写，由这里统一注入 */
-function platformHead(appId: string, channel: 'prod' | 'beta' | 'dev') {
+/** 应用自己引用了 boot.js 时补上 appId / channel，否则由平台注入 */
+function injectBoot(html: string, appId: string, channel: 'prod' | 'beta' | 'dev') {
   const qs = `?app=${encodeURIComponent(appId)}&amp;channel=${encodeURIComponent(channel)}`
-  return [
-    `<script src="${BOOT_SCRIPT}${qs}"></script>`,
-    `<link rel="stylesheet" href="/__platform/ui.css">`,
-    `<script src="${TAILWIND_SCRIPT}"></script>`,
-  ]
-}
-
-function injectPlatformHead(html: string, appId: string, channel: 'prod' | 'beta' | 'dev') {
-  const qs = `?app=${encodeURIComponent(appId)}&amp;channel=${encodeURIComponent(channel)}`
-  if (html.includes('/__platform/boot.js')) {
-    // 应用自己引用了 boot.js：补上 appId / channel，避免拿到空配置
-    return html.includes('/__platform/boot.js?')
-      ? html
-      : html.replace('/__platform/boot.js', `${BOOT_SCRIPT}${qs}`)
-  }
-  const tags = platformHead(appId, channel).join('\n    ')
-  return html.replace(/<head[^>]*>/i, m => `${m}\n    ${tags}`)
+  if (html.includes(BOOT_SCRIPT))
+    return html.includes(`${BOOT_SCRIPT}?`) ? html : html.replace(BOOT_SCRIPT, `${BOOT_SCRIPT}${qs}`)
+  return html.replace(/<head[^>]*>/i, m => `${m}\n    <script src="${BOOT_SCRIPT}${qs}"></script>`)
 }
 
 async function buildFiles(buildId: string) {
@@ -95,7 +80,7 @@ function rewriteAppUrls(text: string, base: string, urls: Set<string>) {
     })
 }
 
-/** 改写结果按 buildId + 路径 + 前缀缓存；预览草稿没有 buildId，直接用内容 hash 作键 */
+/** 改写结果按 buildId + 路径 + 前缀缓存 */
 function rewriteFile(data: Buffer, path: string, base: string, urls: Set<string>, cacheKey: string) {
   const key = `${cacheKey}|${path}|${base}`
   const hit = rewriteCache.get(key)
@@ -108,8 +93,8 @@ function rewriteFile(data: Buffer, path: string, base: string, urls: Set<string>
   return out
 }
 
-/** 按文件清单返回静态文件；dev 直接读草稿，beta/prod 读构建产物（内容相同） */
-async function serveFiles(req: FastifyRequest, reply: FastifyReply, files: Map<string, SnapshotFile>, channel: 'prod' | 'beta' | 'dev') {
+/** 按文件清单返回静态文件；beta/prod 读构建产物 */
+async function serveFiles(req: FastifyRequest, reply: FastifyReply, files: Map<string, SnapshotFile>, channel: 'prod' | 'beta') {
   const site = req.site
   if (site?.kind !== 'app')
     return reply.status(404).send('Not Found')
@@ -124,11 +109,12 @@ async function serveFiles(req: FastifyRequest, reply: FastifyReply, files: Map<s
   if (path.endsWith('.map'))
     return reply.status(404).send('Not Found')
   let file = files.get(path)
-  // public/ 下的文件按应用根路径访问（/logo.png → public/logo.png），各渠道一致
+  // public/ 下的文件按应用根路径访问（/logo.png → public/logo.png）
   if (!file && files.has(`public/${path}`)) {
     file = files.get(`public/${path}`)
     path = `public/${path}`
   }
+  // 前端路由：无扩展名的路径回退到 index.html
   if (!file && !/\.[a-z0-9]+$/i.test(path)) {
     file = files.get('index.html')
     path = 'index.html'
@@ -144,20 +130,15 @@ async function serveFiles(req: FastifyRequest, reply: FastifyReply, files: Map<s
     ? rewriteFile(raw, path, base, appUrlPaths(files), file.hash)
     : raw
   const etag = `"${file.hash.slice(0, 32)}"`
-  if (channel !== 'dev' && req.headers['if-none-match'] === etag)
+  if (req.headers['if-none-match'] === etag)
     return reply.status(304).send()
   const headers: Record<string, string> = { 'content-type': mimeOf(path), ...SECURITY_HEADERS }
   if (path === 'index.html') {
-    Object.assign(headers, await appPageHeaders(appId, channel, req.headers.host ?? ''), { 'cache-control': 'no-store' })
-    return reply.headers(headers).send(injectPlatformHead(data.toString('utf8'), appId, channel))
+    Object.assign(headers, await appPageHeaders(appId, channel, req.headers.host ?? ''), { 'cache-control': 'no-cache' })
+    return reply.headers(headers).send(injectBoot(data.toString('utf8'), appId, channel))
   }
-  if (channel === 'dev') {
-    headers['cache-control'] = 'no-store'
-  }
-  else {
-    headers.etag = etag
-    headers['cache-control'] = path.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=60'
-  }
+  headers.etag = etag
+  headers['cache-control'] = path.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'public, max-age=60'
   return reply.headers(headers).send(data)
 }
 
@@ -167,6 +148,8 @@ export async function serveAppBuild(req: FastifyRequest, reply: FastifyReply) {
   if (site?.kind !== 'app')
     return reply.status(404).send({ error_code: 'NOT_FOUND', error_msg: 'Not Found' })
   const { appId, channel } = site
+  if (channel === 'dev')
+    return reply.status(404).send({ error_code: 'NOT_FOUND', error_msg: 'Not Found' })
   const doc = await getApp(appId)
   if (!doc)
     return sendPage(reply, 404, placeholderPage('not_found'))
@@ -186,16 +169,4 @@ export async function serveAppBuild(req: FastifyRequest, reply: FastifyReply) {
   if (!files)
     return sendPage(reply, 500, placeholderPage('not_found'))
   return serveFiles(req, reply, files, channel)
-}
-
-/** 实时预览：直接返回草稿文件，没有编译，也没有 dev server */
-export async function serveAppDraft(req: FastifyRequest, reply: FastifyReply) {
-  const site = req.site
-  if (site?.kind !== 'app')
-    return reply.status(404).send({ error_code: 'NOT_FOUND', error_msg: 'Not Found' })
-  const doc = await getApp(site.appId)
-  if (!doc)
-    return sendPage(reply, 404, placeholderPage('not_found'))
-  const files = new Map((await currentFiles(site.appId)).map(f => [f.path, f]))
-  return serveFiles(req, reply, files, 'dev')
 }

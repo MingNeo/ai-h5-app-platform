@@ -6,7 +6,7 @@ const dir = join(dirname(fileURLToPath(import.meta.url)), '../docs')
 const read = (name: string) => readFileSync(join(dir, `${name}.md`), 'utf8')
 
 export const DOC_TOPICS = {
-  rules: '平台开发规范（纯 HTML + 原生 JS、目录、Tailwind 与原生 HTML、安全约束、工作方式）',
+  rules: '平台开发规范（Vue 3 + Vite、依赖白名单、目录、样式与资源、安全约束、工作方式）',
   sdk: '平台 SDK 用法（身份与登录、数据库、KV、文件、业务接口、错误处理、常见模式）',
   manifest: 'manifest.json 参考（作用与生效方式、顶层字段、集合、ACL、字段、索引、限制、与其他文件的关系）',
   'admin-view': '应用后台视图 admin.json 参考（数据来源与权限、统计卡片、图表、表格、筛选、AI 生成规范）',

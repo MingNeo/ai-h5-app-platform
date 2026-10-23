@@ -1,6 +1,9 @@
+import { LOCKED_FILES } from '@app-platform/app-template'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { generatedFiles } from '../../core/biz-docs'
 import { createSnapshot, currentFiles, deleteDraft, getSnapshot, listDraft, moveDraft, readDraft, restoreSnapshot, writeDraft } from '../../core/drafts'
+import { lockedFiles } from '../../core/workspace'
 import { audit } from '../../lib/audit'
 import { blobs } from '../../lib/blob'
 import { err } from '../../lib/errors'
@@ -30,7 +33,8 @@ export function registerFileRoutes(app: FastifyInstance) {
     const users = await col.adminUsers.find({ _id: { $in: [...new Set(files.map(f => f.updatedBy))] } }, { projection: { name: 1 } }).toArray()
     const names = new Map(users.map(u => [u._id, u.name]))
     return ok({
-      files: files.map(f => ({ path: f.path, size: f.size, rev: f.rev, updatedAt: f.updatedAt, updatedBy: names.get(f.updatedBy) ?? f.updatedBy })),
+      files: files.map(f => ({ path: f.path, size: f.size, rev: f.rev, updatedAt: f.updatedAt, updatedBy: names.get(f.updatedBy) ?? f.updatedBy, locked: false })),
+      locked: LOCKED_FILES.map(path => ({ path, locked: true })),
     })
   })
 
@@ -40,17 +44,19 @@ export function registerFileRoutes(app: FastifyInstance) {
     const { path, ref } = req.query as { path?: string, ref?: string }
     if (!path)
       throw err.invalid('缺少 path')
+    if (LOCKED_FILES.includes(path))
+      return ok({ path, rev: 0, locked: true, encoding: 'utf8', content: lockedFiles(await generatedFiles(appId))[path] ?? '' })
     if (ref && ref !== 'draft') {
       const data = await fileAt(appId, ref, path)
       if (!data)
         throw err.notFound('文件不存在')
-      return ok({ path, rev: 0, ...encode(path, data) })
+      return ok({ path, rev: 0, locked: false, ...encode(path, data) })
     }
     const f = await col.draftFiles.findOne({ appId, path })
     const data = f ? await blobs.get(f.hash) : null
     if (!f || !data)
       throw err.notFound('文件不存在')
-    return ok({ path, rev: f.rev, ...encode(path, data) })
+    return ok({ path, rev: f.rev, locked: false, ...encode(path, data) })
   })
 
   app.put('/admin-api/apps/:appId/files/content', async (req) => {

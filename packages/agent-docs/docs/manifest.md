@@ -70,7 +70,7 @@
 | `orientation` | 否 | `portrait`（默认）/ `landscape` / `auto` |
 | `capabilities` | 否 | 平台能力 key，最多 20 个；注册表当前为空，暂时不能声明，保持 `[]` |
 | `bizApis` | 否 | 业务接口路径前缀，最多 50 个，例如 `"/api/coupon/"`；需后台申请并审批 |
-| `dependencies` | 否 | 保留字段，当前没有可用依赖，保持 `[]` |
+| `dependencies` | 否 | 额外使用的白名单依赖，可选 `lodash-es`、`canvas-confetti`、`phaser`、`howler`、`qrcode`、`echarts`，用 `add_dependency` 添加。基础依赖（`vue`、`vue-router`、`vant`、`pinia`、`@vueuse/core`、`dayjs`）可直接 import，不用声明 |
 | `collections` | 否 | 数据集合定义，见下 |
 
 顶层不允许出现未知字段（schema 是 strict 的），写错会直接报错。
