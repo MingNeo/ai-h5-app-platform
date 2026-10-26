@@ -10,21 +10,21 @@
 - 不要写 `.vue`、`.ts`、`.tsx`，也不要 import 任何 npm 包（vue、react、vant 等一律不可用）。
 - **兼容性底线：Safari 12（iOS 12）起步，覆盖现在主流移动端/PC 浏览器和 App 内嵌 WebView。代码不经编译直接跑在浏览器里，没有 polyfill、没有降级，写了不支持的语法/API 就是直接报错或交互失效**：
   - 不要用可选链 `?.` 和空值合并 `??`（Safari 12 不支持，语法错误直接白屏）。要写判断就用 `a && a.b`、`x || 默认值`，或者先取出来判断 `== null`。
-  - 不要用原生 `<dialog>` + `.showModal()`、`popover` 属性 + `popovertarget`（旧内核完全不认，不是样式退化，是整个交互点不开）。自定义弹窗/面板/下拉改用一个 `fixed inset-0`（写成 `top-0 right-0 bottom-0 left-0`，`inset` 简写 Safari 12 也不支持）的遮罩 div + 内容 div，配合一个布尔状态自己控制显示隐藏。
+  - 原生 `<dialog>` / `popover` 和 CSS `inset` 在 Safari 12 支持不完整。可以使用，但需按目标浏览器提供回退；也可以选择平台 `dialog()` 或自定义交互。不要因此限定弹窗或面板的实现方式。
 - **不要自己写 `<script src="/__platform/...">`、`<link>` 引用平台运行时**：平台在返回 `index.html` 时自动注入以下内容，直接使用即可：
   - `/__platform/boot.js`：注入全局对象 `platform`（SDK）
   - `/__platform/tailwind.js`：Tailwind v4 浏览器运行时，扫描 DOM 里的类名生成样式
   - `/__platform/ui.css`：设计令牌（`--ui-*`）、重置、页面容器、轻提示和确认框样式
 - 原子类就是 Tailwind：`flex items-center gap-2 p-4 text-sm text-gray-500 rounded-xl bg-white`，也支持 `p-[10px]`、`bg-[var(--ui-primary)]` 这类任意值。**只能写静态类名**：类名必须在源码里以字面量出现，`'p-' + n` 这种运行时拼接不会被扫描到。
-- **没有组件库**。界面直接用原生标签 + Tailwind 组合；平台只提供下面几个高频交互，避免重复踩坑：
+- **没有组件库**。界面可用原生标签 + Tailwind 组合。下表是可选平台能力和常见写法，不是强制方案；按页面需求与兼容性选择：
 
   | 需求 | 用法 |
   |---|---|
   | 轻提示 | `toast('已保存')` |
   | 确认框 | `await dialog({ title: '删除？', content: '不可恢复', danger: true, confirmText: '删除' })` |
-  | 弹窗 / 底部面板 | 自己写一个 `fixed` 遮罩 div + 内容 div，配合一个状态变量 toggle 显隐；不要用原生 `<dialog>` |
+  | 弹窗 / 底部面板 | 可选平台 `dialog()`、原生控件或自定义实现；按需求、兼容性和页面风格选择 |
   | 折叠 | `<details><summary>标题</summary>…</details>` |
-  | 下拉 / 气泡 | 自己写一个绝对定位的 div，点击切换 class 控制显隐；不要用 `popover` 属性 |
+  | 下拉 / 气泡 | 可选原生 `popover` 或自定义实现；目标浏览器不支持时提供合适回退 |
   | 加载 / 进度 | `<progress class="w-full h-2 accent-[var(--ui-primary)]">`、骨架屏用 `animate-pulse` |
   | 底部导航 | 固定定位 + `pb-[env(safe-area-inset-bottom)]` + 三个 flex 项自己写 |
   | 开关 / 勾选 | 原生 `<input type="checkbox" class="...">`，或用 `peer` + `peer-checked:` 做自定义外观 |
@@ -122,7 +122,7 @@ export function renderHome() {
 
 - 状态变化后重新 `mount(root, ...)` 整块内容即可，不需要虚拟 DOM。列表很大时只重建变化的部分。
 - 只在挂载时绑定一次事件；重渲染后的节点要重新绑定，或用 `delegate()` 在容器上委托。
-- 复杂交互（下拉刷新、虚拟列表、抽屉动画）自己用原生事件和 CSS 实现；能用原生 `<dialog>`、`<details>`、`popover` 就别自己造。
+- 复杂交互可按需求组合平台工具、浏览器原生能力和自定义实现；弹窗、导航等不限定单一方案，兼顾目标浏览器即可。
 
 ## 移动端 H5 规范
 

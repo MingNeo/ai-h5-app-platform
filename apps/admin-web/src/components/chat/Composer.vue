@@ -118,7 +118,12 @@ defineExpose({
 </script>
 
 <template>
-  <div class="border border-[var(--border)] rounded-2xl bg-white shadow-sm focus-within:border-blue-400 transition-colors">
+  <div
+    class="border border-[var(--border)] rounded-2xl bg-white transition-all
+           shadow-[0_1px_2px_rgba(16,24,40,.04),0_3px_10px_rgba(16,24,40,.05)]
+           focus-within:border-[var(--el-color-primary)]
+           focus-within:shadow-[0_1px_2px_rgba(16,24,40,.04),0_0_0_3px_var(--el-color-primary-light-8)]"
+  >
     <div v-if="attachments.length" class="flex flex-wrap gap-1.5 px-3 pt-2.5">
       <el-tag v-for="(a, i) in attachments" :key="i" closable type="info" @close="attachments.splice(i, 1)">
         <span v-if="a.type === 'image'" class="inline-flex items-center gap-1">

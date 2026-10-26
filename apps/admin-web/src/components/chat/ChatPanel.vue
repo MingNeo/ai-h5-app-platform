@@ -337,7 +337,7 @@ onBeforeUnmount(() => unsub?.())
             <div class="grid grid-cols-2 gap-3">
               <button
                 v-for="s in SUGGESTIONS" :key="s" type="button" :disabled="!canEdit"
-                class="text-left text-13px p-3 rounded-xl border border-[var(--border)] bg-white hover:border-blue-300 hover:bg-blue-50/40 cursor-pointer transition-colors"
+                class="text-left text-13px p-3 rounded-xl border border-[var(--border)] bg-white hover:border-[var(--el-color-primary-light-5)] hover:bg-[var(--el-color-primary-light-9)] cursor-pointer transition-colors"
                 @click="useSuggestion(s)"
               >
                 {{ s }}

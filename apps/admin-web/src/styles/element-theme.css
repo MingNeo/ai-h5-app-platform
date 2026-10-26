@@ -296,6 +296,7 @@
 }
 .el-menu--horizontal {
   border-bottom: none;
+  align-items: center;
 }
 .el-menu--horizontal > .el-menu-item {
   height: 34px;
