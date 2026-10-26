@@ -45,7 +45,10 @@ const fieldDefSchema = z.union([
     minLength: z.number().int().nonnegative().optional(),
     min: z.number().optional(),
     max: z.number().optional(),
-    enum: z.array(z.union([z.string(), z.number()])).max(200).optional(),
+    /** 枚举值本身就是展示文本，没有 label/value 映射，需要中文展示就直接用中文做枚举值 */
+    enum: z.array(z.union([z.string(), z.number()], {
+      errorMap: () => ({ message: 'enum 项只能是字符串或数字，不支持 { label, value } 对象；值本身就是展示文本，想要中文展示就直接写中文枚举值' }),
+    })).max(200).optional(),
     /** array 元素类型 */
     items: fieldTypeSchema.optional(),
     maxItems: z.number().int().positive().max(1000).optional(),

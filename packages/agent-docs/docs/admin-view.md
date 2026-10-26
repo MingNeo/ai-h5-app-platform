@@ -110,6 +110,14 @@
 | `orderBy` | 默认排序，最多 3 个 |
 | `pageSize` | 每页条数，1–100，默认 20 |
 | `filters` | 顶部筛选器，最多 8 个。`type`: `select` / `input` / `date`；`select` 不填 `options` 时取字段的 `enum` |
+
+`options` 格式：纯值数组（`string` 或 `number`），**不是** `{ label, value }` 对象——平台没有 code/label 映射机制，数组里的值既是筛选条件也是下拉框显示文本，写什么就显示什么：
+
+```json
+{ "field": "category", "type": "select", "label": "分类", "options": ["中餐", "面食", "快餐"] }
+```
+
+字段本身存的就得是 `"中餐"` 这样的展示文本（manifest 里 `category` 的 `enum` 也要用同样的中文值，见 [manifest.md](manifest.md)），而不是 `chinese` 这类 code；多数情况下不用写 `options`，不填会自动取字段的 `enum`，两边永远一致。
 | `search` | 关键字搜索。只对 `fields` 里列出的**字符串字段**做包含匹配，最多 6 个 |
 | `actions` | `detail` 查看详情（默认开）、`edit` 编辑、`delete` 删除、`create` 新增 |
 
@@ -181,3 +189,4 @@
 - 引用未声明的集合或字段（会被拒绝）
 - 用 `text` 区块承载大段业务文案（它是给运营看的说明，不是内容管理）
 - 依赖 `where` 里的 `$regex`、`$where` 等非白名单操作符（会被拒绝）
+- 给 `filters[].options` 传 `{ label, value }` 对象（会被拒绝，只能是纯值数组，见上）

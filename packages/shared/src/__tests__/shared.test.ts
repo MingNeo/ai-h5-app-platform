@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { appPath, appUrl, parseAppPath, parseSite, validateAppId } from '../app-id'
 import { assertSafeDocument, DslError, normalizeQuery } from '../dsl'
 import { aclRules, fieldsToJsonSchema, parseManifest } from '../manifest'
-import { type BizApiSpec, checkBizCalls, extractBizParams, findBizOperation, generateBizApiDts, isHttpUrl, matchBizPath, normalizeOpenApi, parseOpenApiText, renderBizApiDetail, renderBizApiIndex, responseType, rewriteBizPath, schemaToTs, specOperations } from '../openapi'
+import { type BizApiSpec, checkBizCalls, checkHeaderValues, extractBizParams, findBizOperation, generateBizApiDts, isHttpUrl, matchBizPath, normalizeOpenApi, parseOpenApiText, renderBizApiDetail, renderBizApiIndex, responseType, rewriteBizPath, schemaToTs, specOperations } from '../openapi'
+import { emptyOpForm, opToForm, removeOperation, upsertOperation } from '../openapi-form'
 
 const BASE = 'example.test'
 
@@ -300,5 +301,126 @@ paths:
     // 未开通时也继续核对文档，避免审批通过后才发现参数写错
     expect(pending.some(i => i.message.includes('没有参数 pgae'))).toBe(true)
     expect(issues.filter(i => i.message.includes('/api/coupon/list') && i.message.includes('没有参数')).map(i => i.message)).toEqual([expect.stringContaining('pgae')])
+  })
+})
+
+describe('请求头不能写明文密钥', () => {
+  it('像密钥的请求头名必须用 env:/secret: 引用，其它请求头可以写死', () => {
+    expect(checkHeaderValues({ 'X-Token': 'abcdef' }, [], '目录请求头')).toHaveLength(1)
+    expect(checkHeaderValues({ 'X-Token': 'env:COUPON_TOKEN' }, [], '目录请求头')).toHaveLength(0)
+    expect(checkHeaderValues({ 'X-Token': 'secret:coupon' }, ['coupon'], '目录请求头')).toHaveLength(0)
+    expect(checkHeaderValues({ 'X-Token': 'secret:missing' }, ['coupon'], '目录请求头')[0]).toContain('missing')
+    expect(checkHeaderValues({ 'X-Source': 'web' }, [], '目录请求头')).toHaveLength(0)
+  })
+})
+
+describe('接口表单 ⇄ OpenAPI 文档', () => {
+  const EDITABLE = { paramsEditable: true, bodyEditable: true, responseEditable: true }
+
+  it('新增接口生成可解析的文档', () => {
+    const form = { ...emptyOpForm('/api/coupon/list'), summary: '列表', params: [{ name: 'page', in: 'query' as const, type: 'integer' as const, required: false }] }
+    const res = upsertOperation('', null, form, EDITABLE)
+    expect(res.ok).toBe(true)
+    if (!res.ok)
+      return
+    const parsed = parseOpenApiText(res.specText)
+    expect(parsed.ok).toBe(true)
+    const norm = normalizeOpenApi((parsed as { ok: true, doc: unknown }).doc, '/api/coupon/')
+    expect(norm.ok).toBe(true)
+    const ops = specOperations((norm as { ok: true, spec: BizApiSpec }).spec)
+    expect(ops).toHaveLength(1)
+    expect(ops[0]!.summary).toBe('列表')
+    expect(ops[0]!.parameters[0]).toMatchObject({ name: 'page', in: 'query' })
+  })
+
+  it('编辑已有接口时，$ref 响应和其它字段不受影响', () => {
+    const specText = `openapi: 3.0.3
+info:
+  title: 优惠券
+paths:
+  /api/coupon/{id}/claim:
+    post:
+      operationId: claimCoupon
+      tags: [coupon]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string }
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Coupon' }
+components:
+  schemas:
+    Coupon:
+      type: object
+      properties:
+        id: { type: string }
+`
+    const norm = normalizeOpenApi((parseOpenApiText(specText) as { ok: true, doc: unknown }).doc, '/api/coupon/')
+    expect(norm.ok).toBe(true)
+    const spec = (norm as { ok: true, spec: BizApiSpec }).spec
+    const rawOp = spec.paths['/api/coupon/{id}/claim']!.post as Record<string, unknown>
+    const { form, flags } = opToForm('post', '/api/coupon/{id}/claim', rawOp, false)
+    expect(flags.responseEditable).toBe(false)
+    expect(flags.bodyEditable).toBe(true)
+
+    const res = upsertOperation(specText, { method: 'post', path: '/api/coupon/{id}/claim' }, { ...form, summary: '领取优惠券' }, flags)
+    expect(res.ok).toBe(true)
+    if (!res.ok)
+      return
+    const renorm = normalizeOpenApi((parseOpenApiText(res.specText) as { ok: true, doc: unknown }).doc, '/api/coupon/')
+    expect(renorm.ok).toBe(true)
+    const reSpec = (renorm as { ok: true, spec: BizApiSpec }).spec
+    const op = specOperations(reSpec).find(o => o.method === 'post')!
+    expect(op.summary).toBe('领取优惠券')
+    expect((reSpec.paths['/api/coupon/{id}/claim']!.post as Record<string, unknown>).operationId).toBe('claimCoupon')
+    expect(schemaToTs(responseType(op)!.schema, reSpec)).toBe('{ id?: string }')
+  })
+
+  it('改 method/path 会迁走操作，旧路径没别的方法时整条删掉', () => {
+    const res1 = upsertOperation('', null, emptyOpForm('/api/coupon/list'), EDITABLE)
+    if (!res1.ok)
+      throw new Error('setup failed')
+    const res2 = upsertOperation(res1.specText, { method: 'get', path: '/api/coupon/list' }, emptyOpForm('/api/coupon/all'), EDITABLE)
+    expect(res2.ok).toBe(true)
+    if (!res2.ok)
+      return
+    const norm = normalizeOpenApi((parseOpenApiText(res2.specText) as { ok: true, doc: unknown }).doc, '/api/coupon/')
+    expect(norm.ok).toBe(true)
+    expect(specOperations((norm as { ok: true, spec: BizApiSpec }).spec).map(o => o.path)).toEqual(['/api/coupon/all'])
+  })
+
+  it('删除接口', () => {
+    const res1 = upsertOperation('', null, emptyOpForm('/api/coupon/list'), EDITABLE)
+    if (!res1.ok)
+      throw new Error('setup failed')
+    const res2 = removeOperation(res1.specText, 'get', '/api/coupon/list')
+    expect(res2.ok).toBe(true)
+    if (!res2.ok)
+      return
+    const doc = parseOpenApiText(res2.specText)
+    expect(doc.ok).toBe(true)
+    expect((doc as { ok: true, doc: { paths: object } }).doc.paths).toEqual({})
+  })
+
+  it('JSON 格式文档也能增删，保持 JSON 格式', () => {
+    const base = JSON.stringify({ openapi: '3.0.3', paths: {} })
+    const res = upsertOperation(base, null, emptyOpForm('/api/coupon/list'), EDITABLE)
+    expect(res.ok).toBe(true)
+    if (!res.ok)
+      return
+    expect(res.specText.trim().startsWith('{')).toBe(true)
+    expect(JSON.parse(res.specText).paths['/api/coupon/list'].get).toBeDefined()
   })
 })

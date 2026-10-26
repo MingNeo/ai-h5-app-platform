@@ -73,7 +73,7 @@ export interface BizApiEntry {
   headers?: Record<string, string>
 }
 
-const isObj = (v: unknown): v is Record<string, any> => typeof v === 'object' && v !== null && !Array.isArray(v)
+export const isObj = (v: unknown): v is Record<string, any> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 /** 只保留字符串值、名字合法的请求头 */
 function cleanHeaders(input: Record<string, unknown>): Record<string, string> | undefined {
@@ -94,6 +94,36 @@ export function isHttpUrl(u: string) {
   catch {
     return false
   }
+}
+
+/** 名字像密钥/令牌的请求头，不允许写死明文值 */
+const SENSITIVE_HEADER_RE = /token|secret|key|auth|sign|password|cookie/i
+
+/** 请求头值已经是安全引用（环境变量或平台密钥），不是明文 */
+export function isSafeHeaderValue(v: string) {
+  return v.startsWith('env:') || v.startsWith('secret:')
+}
+
+/**
+ * 请求头里不能把密钥/令牌写成明文：要么引用环境变量 `env:NAME`，要么引用平台
+ * 密钥 `secret:NAME`（NAME 必须已在该服务登记）。`where` 用于错误信息定位。
+ */
+export function checkHeaderValues(headers: Record<string, string> | undefined, secretNames: Iterable<string>, where: string): string[] {
+  const errors: string[] = []
+  const names = new Set(secretNames)
+  for (const [k, v] of Object.entries(headers ?? {})) {
+    if (v.startsWith('secret:')) {
+      const name = v.slice('secret:'.length)
+      if (!names.has(name))
+        errors.push(`${where}.${k}: 引用的密钥 ${name} 不存在，请先在「密钥」里添加`)
+      continue
+    }
+    if (v.startsWith('env:'))
+      continue
+    if (SENSITIVE_HEADER_RE.test(k))
+      errors.push(`${where}.${k}: 请求头名像密钥/令牌，不能写明文值，请存为「密钥」后用 secret:名字 引用（或 env:变量名）`)
+  }
+  return errors
 }
 
 /** 文档文本 → 对象。YAML 与 JSON 都能解析（JSON 是 YAML 的子集），格式不限 */
@@ -183,7 +213,7 @@ export function normalizeOpenApi(input: unknown, prefix: string): { ok: true, sp
   }
 }
 
-function jsonMedia(node: unknown): JsonSchema | undefined {
+export function jsonMedia(node: unknown): JsonSchema | undefined {
   if (!isObj(node) || !isObj(node.content))
     return undefined
   const media = node.content['application/json']

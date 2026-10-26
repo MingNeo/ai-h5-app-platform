@@ -133,6 +133,8 @@ export const config = {
     origin: env.BIZ_API_ORIGIN || '',
     unauthCodes: list(env.BIZ_UNAUTH_CODES || '401'),
     timeoutMs: Number(env.BIZ_TIMEOUT_MS || 15000),
+    /** 后台「连通性测试」读取响应体的上限，超出会截断展示 */
+    testMaxBodyBytes: Number(env.BIZ_TEST_MAX_BODY_BYTES || 65536),
   },
 
   csp: {

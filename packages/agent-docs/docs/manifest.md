@@ -129,6 +129,7 @@
 
 对象形式支持的约束：`type`、`required`、`maxLength`、`minLength`、`min`、`max`、`enum`、`items`、`maxItems`。
 
+- `enum` 的值本身就是前台表单选项和后台列表/筛选器展示的文本，平台没有「code 存库 + label 展示」的映射机制：枚举值该写什么就直接展示什么。需要中文展示就直接用中文做枚举值（如 `["中餐","面食","快餐"]`），不要写英文/拼音 code 再指望另配 label（如 `"chinese"` 配「中餐」）——没有地方能配这个 label，admin-view 的 `filters[].options` 同理，见 [admin-view.md](admin-view.md)
 - 写入数据只能包含声明过的字段，多传会被拒绝（`additionalProperties: false`）
 - string 默认最长 2000，array 默认最多 200 项
 - 单条数据最大 16KB

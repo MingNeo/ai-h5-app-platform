@@ -5,7 +5,7 @@ import { type Channel, dataEnvOf, RESERVED_APP_IDS, APP_ID_RE, appPath } from '@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../../config'
 import { allowedBizPrefixes, approvedGrants, effectiveManifest, getApp } from '../../core/apps'
-import { resolveBizTarget } from '../../core/biz-docs'
+import { buildUpstreamUrl, resolveBizTarget } from '../../core/biz-docs'
 import { pushDevError } from '../../core/dev-errors'
 import { previewCookieName, previewCookieValue, readPreviewClaims, verifyPreviewTicket } from '../../core/preview-access'
 import { blobs } from '../../lib/blob'
@@ -376,9 +376,7 @@ export function registerGateway(app: FastifyInstance) {
     if (!res.ok)
       throw err.capability(res.reason)
     const { target } = res
-    const url = new URL(target.upstream)
-    url.pathname = `${url.pathname.replace(/\/+$/, '')}${target.upstreamPath}`
-    url.search = query
+    const url = buildUpstreamUrl(target.upstream, target.upstreamPath, query)
 
     const headers: Record<string, string> = { ...target.headers }
     const contentType = req.headers['content-type']

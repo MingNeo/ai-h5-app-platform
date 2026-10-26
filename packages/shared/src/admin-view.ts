@@ -11,8 +11,10 @@ export const adminFilterSchema = z.object({
   field: fieldSchema,
   type: z.enum(['select', 'input', 'date']).default('select'),
   label: z.string().max(20).optional(),
-  /** select 的可选项；不填时取字段的 enum */
-  options: z.array(z.union([z.string(), z.number()])).max(50).optional(),
+  /** select 的可选项；不填时取字段的 enum。纯值数组，值本身就是展示文本，没有 label/value 映射 */
+  options: z.array(z.union([z.string(), z.number()], {
+    errorMap: () => ({ message: 'options 项只能是字符串或数字，不支持 { label, value } 对象；值本身就是展示文本，不填则取字段的 enum' }),
+  })).max(50).optional(),
   placeholder: z.string().max(30).optional(),
 }).strict()
 

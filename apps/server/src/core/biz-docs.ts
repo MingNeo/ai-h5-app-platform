@@ -95,8 +95,8 @@ export async function bizCatalogHint(appId: string) {
   return lines.join('\n')
 }
 
-/** env:NAME 形式的请求头取值替换成环境变量；变量缺失时跳过，避免把 "env:XXX" 原样发出去 */
-export function resolveHeaders(headers?: Record<string, string>) {
+/** env:NAME 取环境变量，secret:NAME 取该服务登记的密钥；值缺失时跳过，避免把引用原样发出去 */
+export function resolveHeaders(headers?: Record<string, string>, secrets?: Record<string, string>) {
   const out: Record<string, string> = {}
   for (const [k, v] of Object.entries(headers ?? {})) {
     if (v.startsWith('env:')) {
@@ -105,9 +105,23 @@ export function resolveHeaders(headers?: Record<string, string>) {
         out[k] = value
       continue
     }
+    if (v.startsWith('secret:')) {
+      const value = secrets?.[v.slice(7)]
+      if (value)
+        out[k] = value
+      continue
+    }
     out[k] = v
   }
   return out
+}
+
+/** 对外路径 + 上游地址 → 实际请求的 URL（网关代理与后台连通性测试共用） */
+export function buildUpstreamUrl(upstream: string, upstreamPath: string, search: string) {
+  const url = new URL(upstream)
+  url.pathname = `${url.pathname.replace(/\/+$/, '')}${upstreamPath}`
+  url.search = search
+  return url
 }
 
 export interface BizTarget {
@@ -135,12 +149,13 @@ export async function resolveBizTarget(appId: string, method: string, path: stri
   const upstream = found?.op.upstream ?? entry.upstream ?? config.biz.origin
   if (!upstream)
     return { ok: false, reason: `业务接口 ${path} 没有配置上游地址（请在接口目录或 BIZ_API_ORIGIN 中配置）` }
+  const doc = await col.bizApis.findOne({ prefix: entry.prefix }, { projection: { secrets: 1 } })
   return {
     ok: true,
     target: {
       entry,
       upstream,
-      headers: { ...resolveHeaders(entry.headers), ...resolveHeaders(found?.op.headers) },
+      headers: { ...resolveHeaders(entry.headers, doc?.secrets), ...resolveHeaders(found?.op.headers, doc?.secrets) },
       // 对外路径与上游路径不一致时按文档改写；没配置就原样转发
       upstreamPath: found ? rewriteBizPath(found.op, path) : path,
     },

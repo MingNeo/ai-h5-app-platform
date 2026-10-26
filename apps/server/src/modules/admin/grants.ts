@@ -1,11 +1,14 @@
-import { CAPABILITIES, CAPABILITY_LABELS, isHttpUrl, normalizeOpenApi, parseOpenApiText, specOperations } from '@app-platform/shared'
+import { CAPABILITIES, CAPABILITY_LABELS, checkHeaderValues, HTTP_METHODS, isHttpUrl, normalizeOpenApi, parseOpenApiText, rewriteBizPath, specOperations } from '@app-platform/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { invalidateApp } from '../../core/apps'
+import { buildUpstreamUrl, resolveHeaders } from '../../core/biz-docs'
+import { config } from '../../config'
 import { audit } from '../../lib/audit'
 import { err } from '../../lib/errors'
 import { ok, parseBody } from '../../lib/http'
 import { col } from '../../lib/mongo'
+import { rateLimit } from '../../lib/store'
 import { newId } from '../../lib/tokens'
 import { notifyFeishu } from '../build/notify'
 import { requireAdmin, requirePerm, requirePlatformAdmin } from './auth'
@@ -22,7 +25,17 @@ export function registerGrantRoutes(app: FastifyInstance) {
         title: b.title,
         description: b.description,
         operations: b.spec ? specOperations(b.spec).length : 0,
-        ...(user.isPlatformAdmin ? { id: b._id, docs: b.docs, upstream: b.upstream ?? '', headers: b.headers ? JSON.stringify(b.headers, null, 2) : '', specText: b.specText || (b.spec ? JSON.stringify(b.spec, null, 2) : '') } : {}),
+        ...(user.isPlatformAdmin
+          ? {
+              id: b._id,
+              docs: b.docs,
+              upstream: b.upstream ?? '',
+              headers: b.headers ? JSON.stringify(b.headers, null, 2) : '',
+              specText: b.specText || (b.spec ? JSON.stringify(b.spec, null, 2) : ''),
+              // 密钥值从不返回，只告诉前端有哪些名字可以引用
+              secretNames: Object.keys(b.secrets ?? {}),
+            }
+          : {}),
       })),
     })
   })
@@ -83,12 +96,43 @@ export function registerGrantRoutes(app: FastifyInstance) {
     description: z.string().max(500).default(''),
     /** 目录默认上游，例如 http://coupon-service.internal:8080；留空则用 BIZ_API_ORIGIN */
     upstream: z.string().trim().max(500).default(''),
-    /** 目录默认请求头（服务令牌等），JSON 对象文本，值可用 env:变量名 */
+    /** 目录默认请求头（服务令牌等），JSON 对象文本，值可用 env:变量名 / secret:密钥名 */
     headers: z.string().max(4000).default(''),
     /** OpenAPI 3 文档（YAML 或 JSON 文本），留空表示不提供结构化文档 */
     specText: z.string().max(1000000).default(''),
     docs: z.string().max(20000).default(''),
+    /** 密钥补丁：字符串表示新增/替换，null 表示删除；没提到的密钥保留原值 */
+    secrets: z.record(z.string(), z.string().max(4000).nullable()).optional(),
   })
+  const SECRET_NAME_RE = /^[A-Za-z0-9_]{1,64}$/
+  /** 按补丁合并密钥：旧值 + 本次新增/替换 - 本次删除 */
+  function applySecretPatch(existing: Record<string, string> | undefined, patch?: Record<string, string | null>) {
+    if (!patch)
+      return existing
+    const out = { ...(existing ?? {}) }
+    for (const [name, value] of Object.entries(patch)) {
+      if (!SECRET_NAME_RE.test(name))
+        throw err.invalid(`密钥名 ${name} 只能包含字母、数字、下划线`)
+      if (value === null) {
+        delete out[name]
+        continue
+      }
+      if (!value.trim())
+        throw err.invalid(`密钥 ${name} 的值不能为空`)
+      out[name] = value
+    }
+    return Object.keys(out).length ? out : undefined
+  }
+  /** 请求头不能写明文密钥：目录级 + 每个接口的 x-upstream-headers 都要核对 */
+  function checkHeaders(headers: Record<string, string> | undefined, spec: ReturnType<typeof readSpec>['spec'], secretNames: string[]) {
+    const errors = checkHeaderValues(headers, secretNames, '目录请求头')
+    if (spec) {
+      for (const op of specOperations(spec))
+        errors.push(...checkHeaderValues(op.headers, secretNames, `${op.method.toUpperCase()} ${op.path} 的请求头`))
+    }
+    if (errors.length)
+      throw err.invalid(errors[0]!)
+  }
   /** 解析并校验文档，返回要存储的内容（解析结果 + 原始文本，便于原样再编辑） */
   function readSpec(prefix: string, text: string) {
     if (!text.trim())
@@ -109,7 +153,7 @@ export function registerGrantRoutes(app: FastifyInstance) {
       json = JSON.parse(text)
     }
     catch {
-      throw err.invalid('请求头需为 JSON 对象，例如 { "X-Token": "env:COUPON_TOKEN" }')
+      throw err.invalid('请求头需为 JSON 对象，例如 { "X-Token": "secret:coupon_token" }')
     }
     if (!json || typeof json !== 'object' || Array.isArray(json) || Object.values(json).some(v => typeof v !== 'string'))
       throw err.invalid('请求头需为 JSON 对象，值为字符串')
@@ -125,10 +169,13 @@ export function registerGrantRoutes(app: FastifyInstance) {
   }
   app.post('/admin-api/biz-apis', async (req) => {
     const user = requirePlatformAdmin(req)
-    const { specText, headers, upstream, ...body } = parseBody(bizSchema, req.body)
+    const { specText, headers, upstream, secrets: secretsPatch, ...body } = parseBody(bizSchema, req.body)
     const stored = readSpec(body.prefix, specText)
+    const secrets = applySecretPatch(undefined, secretsPatch)
+    const parsedHeaders = readHeaders(headers)
+    checkHeaders(parsedHeaders, stored.spec, Object.keys(secrets ?? {}))
     const now = new Date()
-    await col.bizApis.insertOne({ _id: newId(), ...body, ...stored, upstream: readUpstream(upstream), headers: readHeaders(headers), createdBy: user._id, createdAt: now, updatedAt: now }).catch((e) => {
+    await col.bizApis.insertOne({ _id: newId(), ...body, ...stored, upstream: readUpstream(upstream), headers: parsedHeaders, secrets, createdBy: user._id, createdAt: now, updatedAt: now }).catch((e) => {
       if (e?.code === 11000)
         throw err.duplicate('前缀已存在')
       throw e
@@ -137,9 +184,16 @@ export function registerGrantRoutes(app: FastifyInstance) {
   })
   app.put('/admin-api/biz-apis/:id', async (req) => {
     requirePlatformAdmin(req)
-    const { specText, headers, upstream, ...body } = parseBody(bizSchema, req.body)
+    const { id } = req.params as { id: string }
+    const existing = await col.bizApis.findOne({ _id: id })
+    if (!existing)
+      throw err.notFound('接口目录不存在')
+    const { specText, headers, upstream, secrets: secretsPatch, ...body } = parseBody(bizSchema, req.body)
     const stored = readSpec(body.prefix, specText)
-    await col.bizApis.updateOne({ _id: (req.params as { id: string }).id }, { $set: { ...body, ...stored, upstream: readUpstream(upstream), headers: readHeaders(headers), updatedAt: new Date() } })
+    const secrets = applySecretPatch(existing.secrets, secretsPatch)
+    const parsedHeaders = readHeaders(headers)
+    checkHeaders(parsedHeaders, stored.spec, Object.keys(secrets ?? {}))
+    await col.bizApis.updateOne({ _id: id }, { $set: { ...body, ...stored, upstream: readUpstream(upstream), headers: parsedHeaders, secrets, updatedAt: new Date() } })
     return ok({})
   })
   app.delete('/admin-api/biz-apis/:id', async (req) => {
@@ -153,6 +207,80 @@ export function registerGrantRoutes(app: FastifyInstance) {
     const body = parseBody(z.object({ prefix: bizSchema.shape.prefix, specText: z.string().max(1000000) }), req.body)
     const { spec } = readSpec(body.prefix, body.specText)
     return ok({ operations: spec ? specOperations(spec).length : 0 })
+  })
+  /** 连通性测试：按当前编辑内容（不要求已保存）代发一次真实请求，密钥只在服务器内解析，不回传 */
+  app.post('/admin-api/biz-apis/test', async (req) => {
+    const user = requirePlatformAdmin(req)
+    if (!await rateLimit(`biz-test:${user._id}`, 30, 60))
+      throw err.rate()
+    const body = parseBody(z.object({
+      id: z.string().optional(),
+      prefix: bizSchema.shape.prefix,
+      upstream: z.string().trim().max(500).default(''),
+      headers: z.string().max(4000).default(''),
+      specText: z.string().max(1000000),
+      method: z.enum(HTTP_METHODS),
+      path: z.string().min(1).max(500),
+      pathParams: z.record(z.string(), z.string()).default({}),
+      query: z.record(z.string(), z.string()).default({}),
+      body: z.string().max(100000).default(''),
+      cookie: z.string().max(4000).default(''),
+    }), req.body)
+
+    const parsed = parseOpenApiText(body.specText)
+    if (!parsed.ok)
+      throw err.invalid(parsed.errors[0]!)
+    const norm = normalizeOpenApi(parsed.doc, body.prefix)
+    if (!norm.ok)
+      throw err.invalid(norm.errors[0]!)
+    const op = specOperations(norm.spec).find(o => o.method === body.method && o.path === body.path)
+    if (!op)
+      throw err.invalid('接口不存在，请先在上面保存这条编辑')
+
+    const secrets = body.id ? (await col.bizApis.findOne({ _id: body.id }, { projection: { secrets: 1 } }))?.secrets : undefined
+    const catalogUpstream = body.upstream ? readUpstream(body.upstream) : undefined
+    const upstream = op.upstream ?? catalogUpstream ?? config.biz.origin
+    if (!upstream)
+      throw err.invalid('没有配置上游地址')
+
+    let path = body.path
+    for (const [k, v] of Object.entries(body.pathParams))
+      path = path.replace(`{${k}}`, encodeURIComponent(v))
+    const upstreamPath = rewriteBizPath(op, path)
+    const headers: Record<string, string> = { ...resolveHeaders(readHeaders(body.headers), secrets), ...resolveHeaders(op.headers, secrets) }
+    if (body.cookie)
+      headers.cookie = body.cookie
+    const hasBody = Boolean(body.body.trim()) && body.method !== 'get' && body.method !== 'delete'
+    if (hasBody)
+      headers['content-type'] = 'application/json'
+
+    const url = buildUpstreamUrl(upstream, upstreamPath, new URLSearchParams(body.query).toString())
+    const startedAt = Date.now()
+    try {
+      const upstreamRes = await fetch(url, {
+        method: body.method.toUpperCase(),
+        headers,
+        body: hasBody ? body.body : undefined,
+        redirect: 'manual',
+        signal: AbortSignal.timeout(config.biz.timeoutMs),
+      })
+      const buf = Buffer.from(await upstreamRes.arrayBuffer())
+      const truncated = buf.length > config.biz.testMaxBodyBytes
+      audit(user._id, 'biz-apis.test', body.prefix, { method: body.method, path: body.path })
+      return ok({
+        ok: true,
+        status: upstreamRes.status,
+        durationMs: Date.now() - startedAt,
+        contentType: upstreamRes.headers.get('content-type') ?? '',
+        body: (truncated ? buf.subarray(0, config.biz.testMaxBodyBytes) : buf).toString('utf8'),
+        truncated,
+        url: url.toString(),
+      })
+    }
+    catch (e) {
+      const timeout = (e as Error).name === 'TimeoutError' || (e as Error).name === 'AbortError'
+      return ok({ ok: false, error: timeout ? '请求超时' : `请求失败：${(e as Error).message}`, url: url.toString(), durationMs: Date.now() - startedAt })
+    }
   })
 
   app.get('/admin-api/audit', async (req) => {

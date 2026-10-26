@@ -131,8 +131,10 @@ export interface BizApiDoc {
   docs: string
   /** 目录级默认上游地址（内网服务），接口可用 x-upstream 覆盖 */
   upstream?: string
-  /** 目录级附加请求头（服务令牌），值支持 env:变量名 */
+  /** 目录级附加请求头（服务令牌），值支持 env:变量名 / secret:密钥名 */
   headers?: Record<string, string>
+  /** 本服务登记的密钥（服务令牌等），只在代理转发时读取，从不返回给后台前端 */
+  secrets?: Record<string, string>
   createdBy: string
   createdAt: Date
   updatedAt: Date

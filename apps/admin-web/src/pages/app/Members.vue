@@ -10,6 +10,7 @@ const appId = store.app!.appId
 const canManage = computed(() => store.can('app.manage'))
 const members = ref<Array<{ userId: string, role: AppRole, perms: string[], name: string, avatar: string, email: string }>>([])
 const adding = ref(false)
+const submitting = ref(false)
 const searchResult = ref<Array<{ id: string, name: string, email: string }>>([])
 const selectedUser = ref('')
 const newRole = ref('developer')
@@ -34,11 +35,17 @@ async function setRole(userId: string, role: string) {
 }
 
 async function add() {
-  if (!selectedUser.value)
+  if (!selectedUser.value || submitting.value)
     return
-  await setRole(selectedUser.value, newRole.value)
-  adding.value = false
-  selectedUser.value = ''
+  submitting.value = true
+  try {
+    await setRole(selectedUser.value, newRole.value)
+    adding.value = false
+    selectedUser.value = ''
+  }
+  finally {
+    submitting.value = false
+  }
 }
 
 async function remove(userId: string, name: string) {
@@ -90,23 +97,30 @@ onMounted(load)
         负责人：全部权限；开发者：对话开发、编辑代码、写测试数据、生成测试版；发布员：发布与回滚；数据管理员：读写数据、导出与同步；运营：只看后台视图与监控；只读：查看视图和数据。成员需要先登录过一次后台。
       </div>
     </div>
-    <el-dialog v-model="adding" title="添加成员" width="440px">
+    <el-dialog v-model="adding" title="添加成员" width="500px">
       <el-select v-model="selectedUser" filterable remote :remote-method="search" placeholder="搜索姓名或邮箱" class="w-full mb-3">
         <el-option v-for="u in searchResult" :key="u.id" :label="`${u.name} ${u.email}`" :value="u.id" />
       </el-select>
-      <el-radio-group v-model="newRole">
+      <el-radio-group v-model="newRole" class="role-picker">
         <el-radio-button v-for="r in ROLES" :key="r.key" :value="r.key">
           {{ r.label }}
         </el-radio-button>
       </el-radio-group>
       <template #footer>
-        <el-button @click="adding = false">
+        <el-button :disabled="submitting" @click="adding = false">
           取消
         </el-button>
-        <el-button type="primary" :disabled="!selectedUser" @click="add">
+        <el-button type="primary" :loading="submitting" :disabled="!selectedUser" @click="add">
           添加
         </el-button>
       </template>
     </el-dialog>
   </div>
 </template>
+
+<style scoped>
+.role-picker {
+  flex-wrap: wrap;
+  width: 100%;
+}
+</style>
