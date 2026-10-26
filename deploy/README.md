@@ -113,9 +113,8 @@ make image
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm --filter @app-platform/sdk build
-pnpm --filter @app-platform/admin-web build
-NODE_ENV=production node --import tsx apps/server/src/main.ts
+pnpm build               # 构建 sdk + admin-web
+pnpm start               # NODE_ENV=production 按需自己加在 EnvironmentFile / .env.local 里
 ```
 
 环境变量通过进程环境注入（systemd `EnvironmentFile`、PM2、supervisord 均可）；也可以放在仓库根目录的 `.env.local`，启动时会读取，但不会覆盖已有环境变量。

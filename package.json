@@ -10,6 +10,7 @@
     "dev": "pnpm -r --parallel --filter @app-platform/server --filter @app-platform/admin-web dev",
     "dev:server": "pnpm --filter @app-platform/server dev",
     "dev:admin": "pnpm --filter @app-platform/admin-web dev",
+    "start": "pnpm --filter @app-platform/server start",
     "build": "pnpm -r build",
     "build:sdk": "pnpm --filter @app-platform/sdk build",
     "typecheck": "pnpm -r typecheck",
