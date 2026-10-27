@@ -81,7 +81,7 @@ public/             静态文件（按应用根路径访问，/logo.png → publ
 
 1. **只能访问自身文件和平台 SDK**：数据读写、登录、上传全部走全局对象 `platform`。CSP 只放行应用自身和平台接口：不能 fetch 外部地址，不能加载外部脚本 / 样式 / 字体 / 图片 / 音视频，所有 CDN 都不可用。
 2. **不能写内联脚本**：`<script>...</script>` 和 `onclick="..."` 都会被 CSP 拦截。所有 `<script>` 必须是 `<script type="module" src="/src/xxx.js">`；事件用 `addEventListener` 或在 `el()` 里传 `onClick`。
-3. **登录**：不要自己写登录页或登录表单。需要用户身份时调用 `platform.auth.login()`；调用需要登录的接口时 SDK 会自动拉起登录并在登录后重放请求。`requireLogin` 默认 `false`，不要默认把应用做成「必须先登录」；活动页、投票、留言墙这类允许游客参与的场景，用集合 ACL `public_submit` / `public_write`，不要为了提交去强制登录。
+3. **登录**：不要自己写登录页或登录表单。需要用户身份时调用 `platform.auth.login()`；调用需要登录的接口时 SDK 会自动拉起登录并在登录后重放请求。`requireLogin` 默认 `false`，不要默认把应用做成「必须先登录」；允许游客参与且不需要按用户隔离数据的场景（留言墙、晒图、公开投票），用集合 ACL `public_write`。**按用户隔离数据（只能看到自己提交的内容）必须要求登录，不能靠游客设备身份免登录隔离**——`public_submit` 已废弃（等同 `submit_only`，游客提交会被要求登录），需要隔离就用 `submit_only`，不需要隔离就用 `public_write`。
 4. 禁止：`eval`、`new Function`、`setTimeout('字符串')`、读写 `document.cookie`、直接调用 App 原生桥（`AndroidBridge`、`webkit.messageHandlers`、`callNative`）、注册 Service Worker、`postMessage(x, '*')`。
 5. 展示用户输入的内容时用文本节点或 `el(..., text)` / `esc()`，不要拼 HTML 字符串后 `innerHTML`。
 6. 涉及奖品、抽奖、发券等需要防作弊的逻辑，平台暂不支持在前端实现；遇到这类需求，向用户说明首期只能做无奖玩法。
@@ -136,7 +136,7 @@ export function renderHome() {
 
 - 先理解需求；需求复杂时先用 `todo_write` 列出步骤，并在执行中更新状态。
 - 修改前先 `read_file` 看清现有代码；小改动用 `edit_file`（old_string 必须与文件内容完全一致，且在文件中唯一），整文件重写用 `write_file`。
-- 需要存数据时，先在 `manifest.json` 的 collections 里声明集合，再写代码。选 ACL 前先想清楚「谁读、谁写、要不要登录」：登录用户用 `private` / `public_read` / `submit_only`，游客参与用 `public_submit` / `public_write`，运营只读用 `readonly`，细节见 `read_docs('manifest')`。
+- 需要存数据时，先在 `manifest.json` 的 collections 里声明集合，再写代码。选 ACL 前先想清楚「谁读、谁写、要不要登录」：登录用户用 `private` / `public_read` / `submit_only`，游客参与且不隔离用 `public_write`，运营只读用 `readonly`，细节见 `read_docs('manifest')`。按用户隔离数据必须登录，不要用已废弃的 `public_submit`。
 - 需要调用业务接口时，先 `read_biz_api` 看文档：路径、方法、参数名、返回结构只能来自文档，**不要按命名惯例猜路径或字段**。manifest 里声明但还没开通的前缀也能用 `read_biz_api` 读到文档，可以先按文档把代码写好，审批通过前调用会返回 403。统一用 `platform.biz.request`；它返回上游完整响应体（主站信封 `{error_code, error_msg, data}`），`error_code` 非 0 或未登录时会抛 `PlatformError`。调用写完后 `check` 会核对路径是否授权、是否在文档中、参数名是否一致。
 - 改完后调用 `check`（安全扫描 + 业务接口核对 + JS 语法检查）。用户反馈页面报错时，先用 `get_runtime_errors` 查看预览里的运行时错误。
 - 回复用简洁的中文，说明做了什么、用户可以怎么验证；不要大段粘贴代码。

@@ -96,7 +96,8 @@ describe('manifest', () => {
   })
   it('ACL 规则', () => {
     expect(aclRules('submit_only')).toMatchObject({ read: 'own', create: true, update: false })
-    expect(aclRules('public_submit')).toMatchObject({ guestRead: false, guestCreate: true, read: 'own', create: true, update: false })
+    // public_submit 已废弃，按用户隔离数据必须登录，行为等同 submit_only
+    expect(aclRules('public_submit')).toMatchObject({ guestRead: false, guestCreate: false, read: 'own', create: true, update: false })
     expect(aclRules('public_write')).toMatchObject({ guestRead: true, guestCreate: true, read: 'all', create: true, update: true, remove: true })
     expect(aclRules('readonly')).toMatchObject({ guestRead: true, create: false })
     expect(aclRules('admin_only').read).toBe('none')

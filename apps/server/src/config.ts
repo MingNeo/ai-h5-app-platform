@@ -170,7 +170,7 @@ export const config = {
     contextTokens: num(env.LLM_CONTEXT_TOKENS, 128_000),
     maxSteps: num(env.AGENT_MAX_STEPS, 40),
     maxAutoFix: num(env.AGENT_MAX_AUTOFIX, 3),
-    dailyTokensPerUser: num(env.AGENT_DAILY_TOKENS_PER_USER, 3_000_000),
+    dailyTokensPerUser: num(env.AGENT_DAILY_TOKENS_PER_USER, 5_000_000),
   },
 
   moderation: {

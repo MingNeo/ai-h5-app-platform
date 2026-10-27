@@ -21,7 +21,7 @@
 - `dev` 看开发数据（草稿集合、预览里提交的数据），`prod` 看线上数据，两边独立，互不影响
 - 查看数据：`viewer` 即可；新增/编辑/删除：`dev` 需要 `developer`，`prod` 需要 `owner`
 - 导出 CSV：仅 `owner`，包含 `_id`、`_owner`、声明字段、`_createdAt`，最多 5 万行
-- 后台是管理视角，不受集合 ACL 限制：`admin_only` 的数据也能看，`public_submit` / `public_write` 的游客提交也在列表里
+- 后台是管理视角，不受集合 ACL 限制：`admin_only` 的数据也能看，`public_write` 的游客提交也在列表里
 - 游客提交的记录 `_owner` 是 `vid:<设备标识>`，`_ownerProfile.nickname` 显示「游客」；运营可以直接编辑或删除
 
 ## 顶层结构

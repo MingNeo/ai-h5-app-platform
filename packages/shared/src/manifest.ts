@@ -7,7 +7,7 @@ export const ACL_DESCRIPTIONS: Record<AclPreset, string> = {
   private: '仅本人可读写',
   public_read: '所有人可读（含游客），本人可增删改',
   submit_only: '本人可提交、可读自己的，不能修改',
-  public_submit: '游客可提交、可读自己的，不能修改',
+  public_submit: '（已废弃，等同 submit_only）本人可提交、可读自己的，不能修改',
   public_write: '所有人可读；游客可提交、可改删自己的',
   readonly: '所有人可读，仅后台可写',
   admin_only: '应用端不可访问，仅后台可见',
@@ -193,7 +193,9 @@ export function aclRules(acl: AclPreset): AclRules {
     case 'submit_only':
       return { guestRead: false, read: 'own', guestCreate: false, create: true, update: false, remove: false }
     case 'public_submit':
-      return { guestRead: false, read: 'own', guestCreate: true, create: true, update: false, remove: false }
+      // 按用户隔离数据（read: 'own'）必须要求登录，不允许靠 vid/ip 伪身份免登录隔离；
+      // 该预设保留仅为兼容旧 manifest.json，行为等同 submit_only，不再对外提供免登录入口
+      return { guestRead: false, read: 'own', guestCreate: false, create: true, update: false, remove: false }
     case 'public_write':
       return { guestRead: true, read: 'all', guestCreate: true, create: true, update: true, remove: true }
     case 'readonly':

@@ -48,6 +48,17 @@ async function openBeta() {
   window.open(res.url, '_blank')
 }
 
+async function copyBetaLink() {
+  const res = await api<{ url: string }>(`/apps/${appId}/preview-url`, { body: { channel: 'beta' } })
+  try {
+    await navigator.clipboard.writeText(res.url)
+    ElMessage.success('预览链接已复制，有效期 30 分钟')
+  }
+  catch {
+    ElMessage.error('复制失败，请检查浏览器剪贴板权限')
+  }
+}
+
 async function build() {
   building.value = true
   try {
@@ -141,6 +152,12 @@ onBeforeUnmount(() => clearInterval(timer))
             <el-link v-if="betaHost" type="primary" class="mt-2 text-13px" @click="openBeta">
               {{ betaHost }}
             </el-link>
+            <el-button link type="primary" class="mt-2 text-13px" @click="copyBetaLink">
+              复制预览链接
+            </el-button>
+            <div class="text-12px text-[var(--muted)]">
+              链接和二维码有效期均为 30 分钟
+            </div>
             <el-button v-if="canPublish" type="success" class="mt-3" @click="openRelease(beta)">
               确认上线
             </el-button>

@@ -32,8 +32,10 @@ const groupTotal = ref(0)
 const loadingGroup = ref(false)
 const kvDialog = ref<{ key: string, json: string, isNew: boolean } | null>(null)
 
-const ACL_LABEL: Record<string, string> = { private: '仅本人', public_read: '公开读', submit_only: '仅提交', public_submit: '游客可提交', public_write: '游客可读写', readonly: '只读配置', admin_only: '仅后台' }
+const ACL_LABEL: Record<string, string> = { private: '仅本人', public_read: '公开读', submit_only: '仅提交', public_submit: '仅提交（已废弃）', public_write: '游客可读写', readonly: '只读配置', admin_only: '仅后台' }
 const currentCol = computed(() => collections.value.find(c => c.name === current.value))
+// public_submit 已废弃：按用户隔离数据必须要求登录，不再提供免登录隔离的入口，仅兼容已有旧配置的展示
+const selectableAclPresets = computed(() => ACL_PRESETS.filter(p => p !== 'public_submit' || currentCol.value?.acl === 'public_submit'))
 const columns = computed(() => Object.keys(currentCol.value?.fields ?? {}))
 
 async function loadCollections() {
@@ -247,7 +249,7 @@ onMounted(loadCollections)
             :disabled="savingAcl"
             @change="changeAcl"
           >
-            <el-option v-for="p in ACL_PRESETS" :key="p" :value="p" :label="ACL_LABEL[p]">
+            <el-option v-for="p in selectableAclPresets" :key="p" :value="p" :label="ACL_LABEL[p]">
               <div class="flex flex-col py-1">
                 <span>{{ ACL_LABEL[p] }}</span>
                 <span class="text-12px text-[var(--muted)]">{{ ACL_DESCRIPTIONS[p] }}</span>

@@ -107,7 +107,7 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 
 ### 实时预览
 
-1. 后台调用 `POST /admin-api/apps/:appId/preview-url` 签发短期票据（普通 10 分钟，二维码 30 分钟），票据里带 appId 和渠道。
+1. 后台调用 `POST /admin-api/apps/:appId/preview-url` 签发 30 分钟有效的短期票据（普通链接与二维码一致），票据里带 appId 和渠道。
 2. 浏览器访问 `/__platform/preview-auth?t=...&next=...`，服务端校验票据后写入 `__Host-app_preview__{appId}` cookie（24h，HttpOnly、Secure、SameSite=Lax），再 302 到 `/a/{appId}--dev/{next}`。
 3. `dev` / `beta` 渠道的页面请求和平台接口都要求该 cookie；没有则返回「需要预览权限」占位页。
 4. 预览直接返回草稿文件（`serveAppDraft()`），没有 dev server、没有 HMR；刷新页面即可看到最新代码。
@@ -185,9 +185,9 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 实现见 [gateway/data.ts](../apps/server/src/modules/gateway/data.ts)：
 
 - 集合必须在当前渠道生效的 manifest 中声明：`dev` 用草稿，`beta` / `prod` 用对应 build 的 manifest。
-- ACL 在服务端强制：`private` / `public_read` / `submit_only` / `public_submit` / `public_write` / `readonly` / `admin_only`。完整矩阵见 [manifest.md](manifest.md)。
+- ACL 在服务端强制：`private` / `public_read` / `submit_only` / `public_write` / `readonly` / `admin_only`。完整矩阵见 [manifest.md](manifest.md)。`public_submit` 已废弃，等同 `submit_only`——按用户隔离数据必须登录，不允许靠游客设备身份免登录隔离。
 - 数据归属（actor）：登录用户用 `uid`；游客用 `app_vid` cookie 拼成 `vid:<值>`，没有 cookie 时退回 `ip:<客户端 IP>`。`_owner`、`mine()`、`perUserDocs`、唯一索引、写入限流都按 actor 计算。
-- `public_submit`：游客可新增，读自己的，不能改删；`public_write`：游客可新增，所有人可读，可改删自己设备提交的。其余 ACL 的新增/修改/删除仍要求登录。
+- `public_write`：游客可新增，所有人可读，可改删自己设备提交的。其余 ACL 的新增/修改/删除仍要求登录。
 - 读过滤自动注入 `_owner`（`own` 范围）；写操作只能改自己创建的文档。
 - 写入前用 AJV 校验 `fields`（`additionalProperties: false`），拒绝 `_` 开头的系统字段和 `$` / `.` 开头的键；单条默认上限 16KB。
 - 系统字段由服务端写入：`_id`、`_owner`、`_ownerProfile`、`_createdAt`、`_updatedAt`。
@@ -225,7 +225,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 - 每轮最多 `AGENT_MAX_STEPS`（默认 40）次模型调用。
 - 工具调用结果按顺序回填为 `tool` 消息；界面只展示摘要。
 - 结束前若本轮改过文件或最后一次校验失败，强制跑 `check`；失败自动追加修复提示，最多 `AGENT_MAX_AUTOFIX`（默认 3）轮。
-- 每用户每日 token 上限 `AGENT_DAILY_TOKENS_PER_USER`（默认 300 万），按应用另有统计。
+- 每用户每日 token 上限 `AGENT_DAILY_TOKENS_PER_USER`（默认 500 万），按应用另有统计。
 - 服务重启时，卡在 `running` 的轮次标记为失败并推送 `turn.done`；`queued` 的继续执行。
 
 上下文管理：
@@ -360,7 +360,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `LLM_DEFAULT_MODEL` / `LLM_SMALL_MODEL` | 首个模型 | 主模型、摘要/变更说明模型 |
 | `AGENT_MAX_STEPS` | `40` | 每轮模型调用上限 |
 | `AGENT_MAX_AUTOFIX` | `3` | 自动修复轮数 |
-| `AGENT_DAILY_TOKENS_PER_USER` | `3000000` | 每人每日 token 上限 |
+| `AGENT_DAILY_TOKENS_PER_USER` | `5000000` | 每人每日 token 上限 |
 | `UPLOAD_MAX_BYTES` | `5MB` | 上传大小 |
 | `CDN_PURGE_URL` | 空 | 发布后刷新 CDN |
 

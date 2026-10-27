@@ -18,7 +18,7 @@
   "dependencies": [],
   "collections": {
     "signups": {
-      "acl": "public_submit",
+      "acl": "submit_only",
       "description": "报名记录",
       "fields": {
         "name": { "type": "string", "required": true, "maxLength": 40 },
@@ -62,7 +62,7 @@ schema 是 strict 的：顶层出现未知字段直接报错。
 ```json
 "collections": {
   "signups": {
-    "acl": "public_submit",
+    "acl": "submit_only",
     "description": "报名记录",
     "fields": { "name": "string" },
     "indexes": [{ "fields": { "_owner": 1 }, "unique": true }],
@@ -84,18 +84,19 @@ schema 是 strict 的：顶层出现未知字段直接报错。
 | `private` | 本人 | 登录用户 | 本人 | 个人存档、设置 |
 | `public_read` | 所有人（含游客） | 登录用户 | 本人 | 留言、成绩、晒图 |
 | `submit_only` | 本人 | 登录用户 | 不能 | 报名、问卷、投稿（需要登录） |
-| `public_submit` | 本人（游客按设备） | 游客 | 不能 | 活动报名、抽奖、投票（不登录） |
 | `public_write` | 所有人（含游客） | 游客 | 本人（游客按设备） | 留言墙、晒图、接龙、公开投票 |
 | `readonly` | 所有人 | 仅后台 | 仅后台 | 活动配置、名额 |
 | `admin_only` | 不可读 | 仅后台 | 仅后台 | 敏感收集 |
 
-`public_submit` / `public_write` 的游客实现：
+设计原则：按用户隔离数据（只能读回自己提交的）必须要求登录，不允许靠游客设备身份免登录隔离。`public_submit` 已废弃，服务端解析时等同 `submit_only`（游客提交会被要求登录），管理后台也不再允许新选它（历史配置仍兼容显示）。
+
+`public_write` 的游客实现：
 
 - 未登录访问时，网关用 `app_vid` cookie（`boot.js` 首次访问时写入，随机 12 字节，一年有效）生成身份，`_owner = vid:<值>`
 - 没有 cookie（例如被禁用）时退回 `ip:<客户端 IP>`，同一出口 IP 的游客会共享身份，慎用「每人一次」类约束
 - `mine()`、`perUserDocs`、唯一索引、写入限流都按这个身份生效
 - 游客可清 cookie / 换设备变成新身份；游客提交后登录，数据不会迁移到账号。需要强身份时用 `submit_only` / `public_read`，由登录用户提交
-- `public_write` 的游客可以改/删自己设备提交的记录；`public_submit` 不能改删
+- 游客可以改/删自己设备提交的记录
 
 ### fields
 

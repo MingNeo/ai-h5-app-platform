@@ -96,6 +96,15 @@ function check(name, cond, extra) {
   }
 }
 
+function previewTicketTtl(url, issuedAt) {
+  const ticket = new URL(url).searchParams.get('t')
+  const payload = ticket?.split('.')[0]
+  if (!payload)
+    return 0
+  const { exp } = JSON.parse(Buffer.from(payload, 'base64url').toString())
+  return exp - issuedAt
+}
+
 const sleep = ms => new Promise(r => setTimeout(r, ms))
 
 async function main() {
@@ -143,6 +152,17 @@ async function main() {
   check('应用地址使用路径', r.json?.data?.urls?.prod === `https://${DOMAIN}/a/${APP}/`, r.json?.data?.urls)
   r = await admin(`/apps/${APP}/files`)
   check('模板文件已初始化', r.json?.data?.files?.some(f => f.path === 'src/pages/home.js'), r.json)
+
+  console.log('\n[预览票据时效]')
+  for (const [label, body] of [
+    ['普通预览链接', { channel: 'beta' }],
+    ['二维码预览链接', { channel: 'beta', qr: true }],
+  ]) {
+    const issuedAt = Math.floor(Date.now() / 1000)
+    r = await admin(`/apps/${APP}/preview-url`, { method: 'POST', body })
+    const ttl = previewTicketTtl(r.json?.data?.url ?? '', issuedAt)
+    check(`${label}有效期为 30 分钟`, ttl >= 1800 && ttl <= 1801, ttl)
+  }
 
   console.log('\n[预览访问控制]')
   r = await appReq('dev', '/')

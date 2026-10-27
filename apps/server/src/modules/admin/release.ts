@@ -19,13 +19,13 @@ export function registerReleaseRoutes(app: FastifyInstance) {
       channel: z.enum(['dev', 'beta', 'prod']).default('dev'),
       identity: z.enum(['self', 'guest', 'test']).default('self'),
       path: z.string().startsWith('/').max(500).default('/'),
-      /** 二维码用：有效期更短 */
+      /** 保留兼容；普通和二维码预览票据统一有效 30 分钟 */
       qr: z.boolean().default(false),
     }), req.body)
     const origin = `https://${config.baseDomain}`
     if (body.channel === 'prod')
       return ok({ url: `${appUrl(appId, 'prod', config.baseDomain)}${body.path.replace(/^\/+/, '')}` })
-    const t = issuePreviewTicket(appId, body.channel, user._id, body.identity, body.qr ? 30 * 60 : 10 * 60)
+    const t = issuePreviewTicket(appId, body.channel, user._id, body.identity, 30 * 60)
     return ok({ url: `${origin}/__platform/preview-auth?t=${encodeURIComponent(t)}&next=${encodeURIComponent(body.path)}` })
   })
 

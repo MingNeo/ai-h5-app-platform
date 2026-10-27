@@ -191,6 +191,8 @@ export function registerAppRoutes(app: FastifyInstance) {
       throw err.notFound(`集合 ${name} 不存在`)
     if (col.acl === acl)
       return ok({ acl })
+    if (acl === 'public_submit')
+      throw err.invalid('public_submit 已废弃：按用户隔离数据必须要求登录，不允许靠游客身份免登录隔离，请改用 submit_only')
     const from = col.acl
     col.acl = acl
     await writeDraft(appId, MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`, { userId: user._id })
@@ -232,8 +234,8 @@ export function registerAppRoutes(app: FastifyInstance) {
     }), req.body)
     if (!await col.adminUsers.findOne({ _id: userId }))
       throw err.notFound('用户不存在（需要先登录过后台）')
-    if (userId === user._id && role !== 'owner' && (await col.members.countDocuments({ appId, role: 'owner' })) <= 1)
-      throw err.invalid('应用至少需要一位负责人')
+    if (!user.isPlatformAdmin && userId === user._id && role !== 'owner' && (await col.members.countDocuments({ appId, role: 'owner' })) <= 1)
+      throw err.invalid('不能将应用唯一负责人降级，请先指定其他负责人')
     // perms 为 null 表示沿用角色包
     await col.members.updateOne({ appId, userId }, {
       $set: { role, perms: perms ?? null },

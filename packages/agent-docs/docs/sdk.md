@@ -6,8 +6,8 @@
 
 - 页面默认对游客开放；manifest 的 `requireLogin: true` 才会在启动时强制登录
 - 未登录时，调用需要身份的数据操作会返回 401，SDK 自动拉起一次登录并在成功后重放请求，不需要每个请求手动判断
-- `public_submit` / `public_write` 集合允许游客写：`_owner` 是设备标识 `vid:<app_vid>`，`mine()` 按设备查自己的数据
-- 游客身份是弱身份：清 cookie、换设备就是新身份；需要可靠身份时用登录用户（`submit_only` / `private` / `public_read`）
+- `public_write` 集合允许游客写：`_owner` 是设备标识 `vid:<app_vid>`，`mine()` 按设备查自己的数据
+- 游客身份是弱身份：清 cookie、换设备就是新身份。按用户隔离数据（只读自己的）必须要求登录，用登录用户（`submit_only` / `private` / `public_read`），没有免登录的隔离档位
 
 ```js
 // 初始化（含一次登录状态检查）。需要立刻知道登录状态的地方先 await
@@ -31,7 +31,7 @@ const { list, hasMore } = await votes
   .get()
 const n = await votes.where({ option: 'a' }).count()
 const groups = await votes.groupCount('option')       // [{ value: 'a', count: 12 }, ...]
-const mine = await votes.mine().get()                  // 只查自己创建的；游客按设备（public_submit / public_write）
+const mine = await votes.mine().get()                  // 只查自己创建的；游客按设备（public_write）
 const one = await votes.doc(id).get()                  // 不存在返回 null
 await votes.doc(id).update({ option: 'b' })            // 只能改自己创建的
 await votes.doc(id).remove()
@@ -93,7 +93,7 @@ catch (e) {
 - 一人一票 / 一人一次报名：集合加唯一索引 `{ "fields": { "_owner": 1 }, "unique": true }`；按选项各一票：`{ "fields": { "_owner": 1, "itemId": 1 }, "unique": true }`。
 - 点赞：单独建 `likes` 集合（唯一索引 `_owner + postId`），用 `where({ postId }).count()` 统计。
 - 排行榜：`public_read` 集合存成绩，`orderBy('score', 'desc').limit(50)`，score 必须声明索引；每人只保留最好成绩时，先 `mine()` 查到自己的记录再 `update`。游客也能参与就用 `public_write`。
-- 报名/问卷：`submit_only` 集合，用户提交后只能看到自己的，运营在后台导出。活动页要求不登录也能提交时用 `public_submit`（游客按设备归属，同样能读自己的）；还要展示所有人内容（留言墙、晒图、排行榜、公开投票）就用 `public_write`。
-- 每日打卡/签到：`private` 或 `submit_only` 集合，唯一索引 `_owner + day`（`day` 存 `YYYY-MM-DD`），用 `where({ _owner })` 查自己的记录算连续天数。不登录的签到用 `public_submit`（按设备区分）。
+- 报名/问卷：`submit_only` 集合，用户提交后只能看到自己的，运营在后台导出。需要展示所有人内容（留言墙、晒图、排行榜、公开投票）且允许游客参与就用 `public_write`；不允许免登录按用户隔离（`public_submit` 已废弃）。
+- 每日打卡/签到：`private` 或 `submit_only` 集合，唯一索引 `_owner + day`（`day` 存 `YYYY-MM-DD`），用 `where({ _owner })` 查自己的记录算连续天数。签到要按人隔离就必须登录，用 `submit_only`，不要用已废弃的 `public_submit`。
 - 接龙/名额：`public_read`（或游客参与用 `public_write`）集合存参与记录，另建 `readonly` 集合存名额和截止时间；提交前用 `count()` 判断是否满员。
 - 活动配置（标题、时间、奖项说明）：`readonly` 集合或 `platform.kv.app`，由运营在后台维护。

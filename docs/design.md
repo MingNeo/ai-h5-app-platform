@@ -138,7 +138,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 ## 7. 数据存储（MongoDB）
 - 平台库 `platform`：`apps`、`app_members`、`drafts`、`snapshots`、`builds`、`releases`、`grants`、`biz_api_catalog`、`agent_sessions`、`agent_events`、`audit_logs`、`telemetry_*`（TTL）。
 - 应用库：每个「应用 × 环境」一个库 `appdata_{appId}_{dev|prod}`，含系统集合 `_kv_user`、`_kv_app`、`_files`。系统字段由服务端写入。
-- ACL 预设：`private` / `public_read` / `submit_only` / `public_submit` / `public_write` / `readonly` / `admin_only`；ajv 校验 schema（`additionalProperties:false`）；支持 `unique`、`limits`、`moderate`（公开文本过内容安全）。
+- ACL 预设：`private` / `public_read` / `submit_only` / `public_write` / `readonly` / `admin_only`（`public_submit` 已废弃，等同 `submit_only`：按用户隔离数据必须登录）；ajv 校验 schema（`additionalProperties:false`）；支持 `unique`、`limits`、`moderate`（公开文本过内容安全）。
 - 查询 DSL 白名单：`$eq $ne $gt $gte $lt $lte $in $nin $exists $and $or`，深度 ≤ 3；`limit` ≤ 100；`maxTimeMS` 2000。prod 环境的排序和 count 只能用声明了索引的字段。
 - 环境：预览和测试版用 dev 库，线上用 prod 库。发布时只做增量（新增集合、新增索引）；放宽 ACL 要在审批时确认。
 - 后台数据台：浏览、编辑、导出，`readonly` 种子数据可从 dev 同步到 prod。

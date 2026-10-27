@@ -82,7 +82,7 @@
 ```json
 "collections": {
   "signups": {
-    "acl": "public_submit",
+    "acl": "submit_only",
     "description": "活动报名",
     "fields": { "name": { "type": "string", "required": true }, "mobile": "string" },
     "indexes": [{ "fields": { "_createdAt": -1 } }],
@@ -99,17 +99,20 @@
 | `private` | 本人 | 登录用户 | 本人 | 个人记录、记账、存档 |
 | `public_read` | 所有人（含游客） | 登录用户 | 本人 | 留言、成绩、晒图、排行榜 |
 | `submit_only` | 本人 | 登录用户 | 不能改删 | 报名、问卷、征集、投稿 |
-| `public_submit` | 本人（游客按设备） | 游客可提交 | 不能改删 | 活动报名、抽奖、投票（不登录） |
 | `public_write` | 所有人（含游客） | 游客可提交 | 本人（游客按设备） | 留言墙、晒图、接龙、公开投票 |
 | `readonly` | 所有人 | 仅后台 | 仅后台 | 活动配置、内容、名额 |
 | `admin_only` | 不可读 | 仅后台 | 仅后台 | 敏感收集 |
 
-游客身份说明（`public_submit` / `public_write`）：
+**没有「游客提交、按用户隔离」这个档位**：按用户隔离数据（只能读回自己提交的）必须要求登录，不允许靠游客设备身份免登录隔离。`public_submit` 仍能在 manifest 里解析，但行为已等同 `submit_only`（游客提交会被要求登录），不要再选它。
 
-- 未登录也能写，数据归属 `_owner = vid:<app_vid cookie>`，可以读回、改删自己设备提交的内容
+- 需要「不登录也能参与」又不需要隔离（任何人都能看到所有提交）：用 `public_write`
+- 需要「只能看到自己提交的」：用 `submit_only`，由登录用户提交
+
+游客身份说明（`public_write`）：
+
+- 未登录也能写，数据归属 `_owner = vid:<app_vid cookie>`，可以改删自己设备提交的内容
 - `perUserDocs`、唯一索引、写入限流都按设备生效，能做「每台设备一次/一票」
-- 游客身份是弱身份：清 cookie、换浏览器、换设备就是新身份；游客提交后再登录，两段数据不会合并
-- 需要真实身份、防刷、跨设备同步时，用 `submit_only` / `public_read` / `private`，由登录用户提交
+- 游客身份是弱身份：清 cookie、换浏览器、换设备就是新身份
 - 公开可写的集合建议配 `limits` 和 `moderate`
 
 ### fields
