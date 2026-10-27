@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { AgentEvent, Attachment } from '@app-platform/shared'
+import { TOOL_KIND } from '@app-platform/shared'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { api, ApiError, subscribeSse } from '../../api'
@@ -93,6 +94,9 @@ async function openSession(id: string) {
       turns.value = reducer.turns
       if (ev.type === 'tool.result' || ev.type === 'turn.done')
         store.filesVersion++
+      // 写文件就刷新预览，而不是等整轮结束：改一步就能看到效果
+      if ((ev.type === 'tool.result' && ev.ok && TOOL_KIND[ev.name] === 'write') || ev.type === 'turn.done')
+        store.previewVersion++
       if (ev.type === 'turn.done')
         void loadSessions()
       scrollToBottom()
@@ -208,6 +212,7 @@ async function revert(t: TurnView) {
   }
   ElMessage.success('已撤销')
   store.filesVersion++
+  store.previewVersion++
 }
 
 async function rollback(t: TurnView) {
@@ -215,6 +220,7 @@ async function rollback(t: TurnView) {
   await api(`/turns/${t.id}/rollback`, { body: {} })
   ElMessage.success('已回滚')
   store.filesVersion++
+  store.previewVersion++
 }
 
 function diff(t: TurnView, path?: string) {

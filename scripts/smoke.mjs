@@ -108,9 +108,25 @@ async function main() {
   check('cookie 不能用于后台鉴权', r.status === 401, r.json)
   r = await admin('/auth/dev-login', { method: 'POST', body: { name: '冒烟测试' } })
   adminToken = r.json?.data?.token ?? ''
-  check('本地免登返回 Bearer token（不写 cookie）', r.status === 200 && Boolean(adminToken) && !r.headers.get('set-cookie'), r.json)
+  const resumeSetCookie = r.headers.get('set-cookie') ?? ''
+  check('本地免登返回 Bearer token', r.status === 200 && Boolean(adminToken), r.json)
+  check(
+    '同时只写恢复 cookie（HttpOnly，限定 /admin-api/auth/ 路径）',
+    resumeSetCookie.includes('__Secure-adm_resume=') && /httponly/i.test(resumeSetCookie) && /path=\/admin-api\/auth\//i.test(resumeSetCookie),
+    resumeSetCookie,
+  )
   r = await admin('/auth/me')
   check('Bearer 鉴权可用', r.status === 200 && r.json?.data?.name === '冒烟测试', r.json)
+
+  console.log('\n[刷新免登 resume cookie]')
+  const resumeToken = /__Secure-adm_resume=([^;]+)/.exec(resumeSetCookie)?.[1] ?? ''
+  r = await req(DOMAIN, '/admin-api/auth/resume', { headers: { cookie: `__Secure-adm_resume=${resumeToken}`, 'sec-fetch-mode': 'cors' } })
+  check('非顶层导航调用 resume 被拒', r.status === 403, r.status)
+  r = await req(DOMAIN, '/admin-api/apps', { method: 'POST', body: {}, headers: { cookie: `__Secure-adm_resume=${resumeToken}` } })
+  check('仅带恢复 cookie 不能调业务接口', r.status === 401, r.json)
+  r = await req(DOMAIN, '/admin-api/auth/resume', { headers: { cookie: `__Secure-adm_resume=${resumeToken}`, 'sec-fetch-mode': 'navigate', 'sec-fetch-dest': 'document' } })
+  check('顶层导航带恢复 cookie 换回登录票据', r.status === 302 && (r.headers.get('location') ?? '').includes('/admin#t='), r.headers.get('location'))
+
   r = await admin('/apps', { method: 'POST', body: { appId: 'Bad_ID', name: 'x' } })
   check('非法 appId 被拒', r.status === 422)
   r = await admin('/apps', { method: 'POST', body: { appId: 'admin', name: 'x' } })

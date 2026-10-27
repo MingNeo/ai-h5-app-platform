@@ -5,19 +5,25 @@ import { config } from '../../config'
 import { adminViewCollections } from '../../core/admin-view'
 import { audit } from '../../lib/audit'
 import { err } from '../../lib/errors'
-import { ok, parseBody } from '../../lib/http'
+import { ok, parseBody, parseCookies } from '../../lib/http'
 import { type AdminUserDoc, type AppDoc, col } from '../../lib/mongo'
 import { store } from '../../lib/store'
-import { newId, randomToken, signToken, verifyToken } from '../../lib/tokens'
+import { hashToken, newId, randomToken, signToken, verifyToken } from '../../lib/tokens'
 
 const SESSION_TTL = 7 * 86400
 const TICKET_TTL = 60
+/** 刷新免跳飞书用的恢复 cookie：Path 限定在登录相关接口，应用代码读写不到 /admin-api/auth/ 之外的任何请求 */
+const RESUME_COOKIE = '__Secure-adm_resume'
+const RESUME_PATH = '/admin-api/auth/'
 
 /**
  * 后台与应用同源，**不能使用 cookie 会话**：应用页面发起的同源请求会自动带上后台 cookie，
  * `Origin` 与 `X-App-Admin` 都能伪造，等于任何应用都能冒充管理员。
  * 因此会话 token 通过 URL fragment 一次性下发、前端只存内存、
- * 请求时用 Authorization 头携带。详见 docs/security-boundary.md。
+ * 请求时用 Authorization 头携带。
+ * 刷新后 token 必丢：额外发一个 HttpOnly + Path=/admin-api/auth/ + SameSite=Strict 的恢复 cookie，
+ * 只能在浏览器顶层导航时换一次性票据重新交换，fetch/iframe 发起的请求会被拒；记录哈希后存 Mongo，
+ * 跨进程重启存活。详见 docs/security-boundary.md。
  */
 function bearerToken(req: FastifyRequest): string | undefined {
   const raw = req.headers.authorization
@@ -30,6 +36,41 @@ async function createSession(userId: string) {
   const token = randomToken()
   await store.set(`adm:sess:${token}`, userId, SESSION_TTL)
   return token
+}
+
+/** 登录成功时一并发恢复 cookie；只存哈希，泄库拿不到可用原文 */
+async function issueResume(reply: FastifyReply, userId: string) {
+  const token = randomToken()
+  const now = new Date()
+  await col.adminResumes.insertOne({
+    _id: hashToken(token),
+    userId,
+    createdAt: now,
+    lastUsedAt: now,
+    expiresAt: new Date(now.getTime() + SESSION_TTL * 1000),
+  })
+  reply.setCookie(RESUME_COOKIE, token, {
+    path: RESUME_PATH,
+    httpOnly: true,
+    secure: true,
+    sameSite: 'strict',
+    maxAge: SESSION_TTL,
+  })
+}
+
+function clearResumeCookie(reply: FastifyReply) {
+  reply.clearCookie(RESUME_COOKIE, { path: RESUME_PATH })
+}
+
+/** 只接受浏览器顶层导航（地址栏跳转/location.href），拒绝应用页面用 fetch/iframe 带 cookie 调用 */
+function isTopNavigation(req: FastifyRequest) {
+  const mode = req.headers['sec-fetch-mode']
+  const dest = req.headers['sec-fetch-dest']
+  if (mode !== undefined && mode !== 'navigate')
+    return false
+  if (dest !== undefined && dest !== 'document')
+    return false
+  return true
 }
 
 async function loadAdmin(req: FastifyRequest): Promise<AdminUserDoc | null> {
@@ -208,14 +249,18 @@ export function registerAdminAuth(app: FastifyInstance) {
     return ok(meView(u))
   })
 
-  app.post('/admin-api/auth/logout', async (req) => {
+  app.post('/admin-api/auth/logout', async (req, reply) => {
     const token = bearerToken(req)
     if (token)
       await store.del(`adm:sess:${token}`)
+    const resumeToken = parseCookies(req.headers.cookie)[RESUME_COOKIE]
+    if (resumeToken)
+      await col.adminResumes.deleteOne({ _id: hashToken(resumeToken) })
+    clearResumeCookie(reply)
     return ok({})
   })
 
-  app.post('/admin-api/auth/dev-login', async (req) => {
+  app.post('/admin-api/auth/dev-login', async (req, reply) => {
     if (!config.admin.devBypass)
       throw err.forbidden('未开启本地免登（DEV_ADMIN_BYPASS）')
     const body = (req.body ?? {}) as { name?: string, userId?: string }
@@ -235,13 +280,14 @@ export function registerAdminAuth(app: FastifyInstance) {
       await col.adminUsers.updateOne({ _id: id }, { $set: { isPlatformAdmin: true } })
     }
     const token = await createSession(id)
+    await issueResume(reply, id)
     audit(id, 'admin.login', undefined, { via: 'dev', ...(body.userId ? { asUser: body.userId } : {}) })
     const user = await col.adminUsers.findOne({ _id: id })
     return ok({ token, user: user ? meView(user) : null })
   })
 
   // 票据换会话：票据一次性，交换后删除
-  app.post('/admin-api/auth/exchange', async (req) => {
+  app.post('/admin-api/auth/exchange', async (req, reply) => {
     const { ticket } = parseBody(z.object({ ticket: z.string().min(1).max(4096) }), req.body)
     const claims = verifyToken<{ kind: string, uid: string, jti: string }>(ticket)
     if (!claims || claims.kind !== 'adm-ticket')
@@ -254,7 +300,32 @@ export function registerAdminAuth(app: FastifyInstance) {
     if (!user)
       throw err.forbidden('用户不存在')
     const token = await createSession(uid)
+    await issueResume(reply, uid)
     return ok({ token, user: meView(user) })
+  })
+
+  // 刷新页面后免跳飞书：顶层导航带恢复 cookie 换一次性票据，再走一遍票据交换
+  app.get('/admin-api/auth/resume', async (req, reply) => {
+    const next = safeRedirect((req.query as any).next)
+    if (!isTopNavigation(req))
+      return reply.status(403).send()
+    const token = parseCookies(req.headers.cookie)[RESUME_COOKIE]
+    const doc = token ? await col.adminResumes.findOne({ _id: hashToken(token) }) : null
+    const user = doc ? await col.adminUsers.findOne({ _id: doc.userId }) : null
+    if (!doc || !user) {
+      if (doc)
+        await col.adminResumes.deleteOne({ _id: doc._id })
+      clearResumeCookie(reply)
+      // 恢复失败：走回原来的路径（有飞书配置就自动跳一次，没有就回登录页）
+      if (config.admin.feishuAppId)
+        return reply.redirect(`/admin-api/auth/feishu/login?redirect=${encodeURIComponent(next)}`)
+      return reply.redirect(`/admin/login?redirect=${encodeURIComponent(next)}`)
+    }
+    // 轮换：旧记录失效，换发新 cookie，避免同一个值被长期重放
+    await col.adminResumes.deleteOne({ _id: doc._id })
+    await issueResume(reply, user._id)
+    const newTicket = await issueLoginTicket(user._id)
+    return reply.redirect(`/admin#t=${encodeURIComponent(newTicket)}&next=${encodeURIComponent(next)}`)
   })
 
   app.get('/admin-api/auth/feishu/login', async (req, reply) => {
@@ -293,6 +364,7 @@ export function registerAdminAuth(app: FastifyInstance) {
       email: info.data.enterprise_email || info.data.email || '',
     })
     audit(id, 'admin.login', undefined, { via: 'feishu' })
+    await issueResume(reply, id)
     // fragment 不会发给服务端，也不会出现在 Referer；前端兑换后立即清掉
     const ticket = await issueLoginTicket(id)
     const next = safeRedirect(state.redirect)

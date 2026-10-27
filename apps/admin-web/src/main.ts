@@ -12,8 +12,8 @@ import './styles/element-theme.css'
 const ADMIN_BASE = '/admin'
 
 /**
- * 飞书回调把一次性票据放在 fragment 里（不会发给服务端，也不会进 Referer）。
- * 这里立刻换成 Bearer token 并清掉 URL，票据交换一次即作废。
+ * 飞书回调、恢复 cookie 跳转（/admin-api/auth/resume）都把一次性票据放在 fragment 里
+ * （不会发给服务端，也不会进 Referer）。这里立刻换成 Bearer token 并清掉 URL，票据交换一次即作废。
  */
 async function consumeLoginTicket() {
   const hash = location.hash.replace(/^#/, '')

@@ -234,7 +234,7 @@ docker run -d ... app-platform-server:<new-tag>
 | 启动报 `AUTH_PROVIDER=main-site 时必须配置 AUTH_USERINFO_URL` | 补 `AUTH_USERINFO_URL`，或本地用 `AUTH_PROVIDER=mock` |
 | 访问根路径 404 / 「资源不存在」 | 请求 Host 不是 `APP_BASE_DOMAIN`；检查 DNS、代理的 `Host` 头 |
 | `/admin/` 打开空白或 404 | 镜像里没有 `apps/admin-web/dist`；重新构建镜像 |
-| 后台登录后刷新掉登录 | 正常：token 只存内存，刷新会走一次飞书静默登录；若失败检查飞书回调 URL 和 `SECRET` 是否稳定 |
+| 后台登录后刷新就掉登录、天天要重新飞书登录 | token 本身只存内存，刷新应该靠恢复 cookie（存 Mongo `admin_resumes`）免登，正常只跳一下 `/admin-api/auth/resume` 就回来；如果每次刷新都真的弹回飞书登录页，检查：`DEV_ADMIN_BYPASS` 是否误设为 1（会跳过自动恢复逻辑）、反向代理有没有转发 `Cookie` 头、`MONGO_URL` 是否可写 |
 | 后台接口 401 | 确认请求带 `Authorization: Bearer`，且代理没有改写 `Origin` / 丢掉头 |
 | AI 对话卡住或断开 | 检查代理的 SSE 配置（关闭缓冲、超时）、`REDIS_URL` 与 LLM 网关连通性 |
 | 发布后新版本没生效 | 确认发布记录指向新 build；配置了 `CDN_PURGE_URL` 时检查刷新回调 |

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { customAlphabet } from 'nanoid'
 import { config } from '../config'
 
@@ -6,6 +6,11 @@ export const newId = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 16)
 
 export function randomToken(bytes = 32) {
   return randomBytes(bytes).toString('base64url')
+}
+
+/** 存储前单向哈希：数据库里只留哈希，泄库拿不到可用的原始 token */
+export function hashToken(token: string) {
+  return createHash('sha256').update(token).digest('hex')
 }
 
 /** 签名令牌：base64url(json).base64url(hmac) */

@@ -120,8 +120,9 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 ### 后台
 
 - 只支持飞书 OAuth；本地 `DEV_ADMIN_BYPASS=1` 时可用 `/admin-api/auth/dev-login`。
-- 后台与应用**同源**，因此**不使用 cookie 会话**。飞书回调签发 60 秒一次性票据，302 到 `/admin#t=...`；SPA 用 `POST /admin-api/auth/exchange` 换 Bearer token，只存内存（刷新后静默重登）。
-- `/admin-api/*` 只认 `Authorization: Bearer`，没有 cookie 回退；非 GET 仍校验 `Origin`；OPTIONS 直接 403；不开放 CORS。
+- 后台与应用**同源**，因此**不使用 cookie 会话**。飞书回调签发 60 秒一次性票据，302 到 `/admin#t=...`；SPA 用 `POST /admin-api/auth/exchange` 换 Bearer token，只存内存（刷新后丢失）。
+- 刷新免跳飞书：登录时额外发一枚恢复 cookie（`Path=/admin-api/auth/`，`HttpOnly`+`Secure`+`SameSite=Strict`，值的哈希存 Mongo `admin_resumes`，TTL 自动过期，跨进程重启存活）。刷新后整页跳 `GET /admin-api/auth/resume`，服务端校验是浏览器顶层导航（`Sec-Fetch-Mode: navigate`）后换新票据走回 `exchange` 流程；校验失败才回退到飞书登录。细节见 [security-boundary.md](security-boundary.md)。
+- `/admin-api/*` 只认 `Authorization: Bearer`（登录相关路由除外），没有 cookie 回退；非 GET 仍校验 `Origin`；OPTIONS 直接 403；不开放 CORS。
 - `/admin` 文档返回 `Cross-Origin-Opener-Policy: same-origin`、`X-Frame-Options: DENY`、`frame-ancestors 'none'`，阻止应用页面通过 popup / iframe 拿到 token。细节见 [security-boundary.md](security-boundary.md)。
 - 角色：平台管理员、应用 `owner` / `developer` / `publisher` / `data` / `operator` / `viewer`。平台管理员对所有应用等价于 owner。
 - 鉴权按权限位（`APP_PERMS`，[permissions.ts](../packages/shared/src/permissions.ts)）判断，角色只是预置权限包：`owner` 全量、`developer` 开发与测试数据、`publisher` 发布回滚、`data` 数据读写导出、`operator` 只看后台视图与监控、`viewer` 还可读任意集合。成员文档的 `perms` 可覆盖角色包。
@@ -300,6 +301,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | 集合 | 内容 |
 |---|---|
 | `admin_users` | 后台用户、飞书 openId、是否平台管理员 |
+| `admin_resumes` | 后台刷新免登的恢复 cookie 哈希，TTL 索引自动过期 |
 | `apps` | 应用元数据、状态、排期、beta/prod 指针 |
 | `app_members` | 应用成员与角色 |
 | `draft_files` | 草稿文件元数据（hash、size、rev） |

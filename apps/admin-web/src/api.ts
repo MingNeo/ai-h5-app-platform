@@ -10,7 +10,8 @@ export class ApiError extends Error {
  * 后台与应用同源，不能用 cookie 保存会话（应用页面发出的同源请求会自动带上 cookie）。
  * token 只放内存：sessionStorage 会随 window.open 复制给新标签页，
  * 而后台打开预览时新标签页里跑的就是应用代码，等于把管理员 token 交给应用。
- * 刷新页面后 token 丢失，走一次飞书静默登录即可。
+ * 刷新页面后 token 丢失，Login.vue 会跳一次 /admin-api/auth/resume 用恢复 cookie 免登；
+ * 恢复失败才退回飞书登录。
  */
 let token: string | null = null
 

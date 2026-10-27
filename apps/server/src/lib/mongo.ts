@@ -31,6 +31,18 @@ export interface AppDoc {
   deletedAt?: Date
 }
 
+/**
+ * 刷新页面免跳飞书用的恢复凭证：_id 是 sha256(token)，不存原始 token。
+ * 存 Mongo（而不是内存/Redis 的 store）是为了跨进程重启存活；TTL 索引自动清理过期记录。
+ */
+export interface AdminResumeDoc {
+  _id: string
+  userId: string
+  createdAt: Date
+  lastUsedAt: Date
+  expiresAt: Date
+}
+
 export interface MemberDoc {
   _id: string
   appId: string
@@ -284,15 +296,12 @@ export const col = {
   get audit() { return db.collection<AuditDoc>('audit_logs') },
   get apiClients() { return db.collection<ApiClientDoc>('api_clients') },
   get telemetry() { return db.collection<TelemetryDoc>('telemetry_events') },
+  get adminResumes() { return db.collection<AdminResumeDoc>('admin_resumes') },
 }
 
-/** 应用数据库：每个「应用 × 环境」一个库 */
-export function appDataDb(appId: string, env: 'dev' | 'prod'): Db {
-  return client.db(`appdata_${appId}_${env}`)
-}
-
+/** 应用数据：放在平台主库，按「应用 × 环境」加集合名前缀隔离（线上账号通常只授权主库，独立建库会 Unauthorized） */
 export function appCollection<T extends object = Record<string, unknown>>(appId: string, env: 'dev' | 'prod', name: string): Collection<T> {
-  return appDataDb(appId, env).collection<T>(name)
+  return db.collection<T>(`appdata_${appId}_${env}__${name}`)
 }
 
 async function ensureIndexes() {
@@ -316,5 +325,6 @@ async function ensureIndexes() {
     col.apiClients.createIndex({ tokenHash: 1 }, { unique: true }),
     col.telemetry.createIndex({ ts: 1 }, { expireAfterSeconds: 30 * 86400 }),
     col.telemetry.createIndex({ appId: 1, type: 1, ts: -1 }),
+    col.adminResumes.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
   ])
 }

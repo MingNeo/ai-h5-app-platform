@@ -24,10 +24,10 @@ onMounted(async () => {
   // 上次选过的人优先；否则默认最近登录的账号
   if (options.value?.devBypass && !devChoice.value && options.value.devUsers?.length)
     devChoice.value = `u:${options.value.devUsers[0]!.id}`
-  // token 只存在内存，刷新后丢一次；自动走一次飞书静默登录，失败/取消后不再自动跳
+  // token 只存在内存，刷新后丢一次；先试恢复 cookie 免跳飞书，没有才走飞书静默登录；失败/取消后不再自动跳
   if (options.value?.feishu && !options.value.devBypass && !sessionStorage.getItem(LOGIN_TRIED)) {
     sessionStorage.setItem(LOGIN_TRIED, '1')
-    feishuLogin()
+    location.href = `/admin-api/auth/resume?next=${encodeURIComponent(redirect())}`
   }
 })
 

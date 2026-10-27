@@ -127,6 +127,7 @@ async function save() {
     remoteChanged.value = false
     ElMessage.success('已保存')
     void loadFiles()
+    store.previewVersion++
   }
   catch (e) {
     if (e instanceof ApiError && e.code === 'CONFLICT') {
@@ -136,6 +137,7 @@ async function save() {
           rev.value = res.rev
           original.value = content.value
           ElMessage.success('已覆盖保存')
+          store.previewVersion++
         })
         .catch(() => open(current.value!))
     }
@@ -153,6 +155,7 @@ async function newFile() {
   await api(`/apps/${props.appId}/files/content`, { method: 'PUT', body: { path: value, content: '' } })
   await loadFiles()
   await open(value)
+  store.previewVersion++
 }
 
 async function renameFile() {
@@ -164,6 +167,7 @@ async function renameFile() {
   await api(`/apps/${props.appId}/files/move`, { body: { from: current.value, to: value } })
   current.value = value
   await loadFiles()
+  store.previewVersion++
 }
 
 async function deleteFile() {
@@ -174,6 +178,7 @@ async function deleteFile() {
   current.value = null
   original.value = content.value = ''
   await loadFiles()
+  store.previewVersion++
 }
 
 async function onUpload(e: Event) {
@@ -209,6 +214,7 @@ async function restore(id: string, message: string) {
   await api(`/apps/${props.appId}/snapshots/${id}/restore`, { body: {} })
   ElMessage.success('已恢复')
   store.filesVersion++
+  store.previewVersion++
   snapshots.value = await api(`/apps/${props.appId}/snapshots`)
 }
 
