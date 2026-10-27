@@ -13,6 +13,8 @@ const ACTION_LABEL: Record<string, string> = {
   'app.rollback': '回滚',
   'member.set': '设置成员',
   'member.remove': '移除成员',
+  'platform-admin.grant': '设为平台管理员',
+  'platform-admin.revoke': '取消平台管理员',
   'draft.restore': '恢复版本',
   'turn.revert': '撤销 AI 改动',
   'turn.rollback': '回滚到某条消息前',

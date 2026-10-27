@@ -159,8 +159,26 @@ function meView(u: AdminUserDoc) {
   return { id: u._id, name: u.name, avatar: u.avatar, email: u.email, isPlatformAdmin: u.isPlatformAdmin }
 }
 
+/** 邮箱或 openId 命中 PLATFORM_ADMINS 配置 */
+export function isConfiguredAdmin(email: string, openId: string | undefined) {
+  return config.admin.platformAdmins.some(a => a === email || a === openId)
+}
+
+/** 服务启动时把 PLATFORM_ADMINS 配置同步到库里，不用等对应账号重新登录 */
+export async function syncPlatformAdmins() {
+  const list = config.admin.platformAdmins
+  if (!list.length)
+    return
+  const res = await col.adminUsers.updateMany(
+    { isPlatformAdmin: false, $or: [{ email: { $in: list } }, { feishuOpenId: { $in: list } }] },
+    { $set: { isPlatformAdmin: true } },
+  )
+  if (res.modifiedCount)
+    console.log(`[auth] PLATFORM_ADMINS 生效：${res.modifiedCount} 个账号成为平台管理员`)
+}
+
 async function upsertUser(info: { openId: string, name: string, avatar: string, email: string }) {
-  const isListed = config.admin.platformAdmins.some(a => a === info.email || a === info.openId)
+  const isListed = isConfiguredAdmin(info.email, info.openId)
   const first = (await col.adminUsers.estimatedDocumentCount()) === 0
   const now = new Date()
   const existing = await col.adminUsers.findOne({ feishuOpenId: info.openId })

@@ -12,6 +12,7 @@ export const router = createRouter({
       component: () => import('./layouts/MainLayout.vue'),
       children: [
         { path: '', component: () => import('./pages/Apps.vue') },
+        { path: 'admin/users', component: () => import('./pages/admin/Users.vue'), meta: { platformAdmin: true } },
         { path: 'admin/grants', component: () => import('./pages/admin/Grants.vue'), meta: { platformAdmin: true } },
         { path: 'admin/biz-apis', component: () => import('./pages/admin/BizApis.vue'), meta: { platformAdmin: true } },
         { path: 'admin/audit', component: () => import('./pages/admin/Audit.vue'), meta: { platformAdmin: true } },

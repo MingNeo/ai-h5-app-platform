@@ -118,6 +118,13 @@ async function main() {
   r = await admin('/auth/me')
   check('Bearer 鉴权可用', r.status === 200 && r.json?.data?.name === '冒烟测试', r.json)
 
+  console.log('\n[用户管理]')
+  r = await admin('/admin-users')
+  check('能看到自己且为平台管理员', r.status === 200 && r.json?.data?.some(u => u.name === '冒烟测试' && u.isPlatformAdmin), r.json)
+  const selfId = r.json?.data?.find(u => u.name === '冒烟测试')?.id
+  r = await admin(`/admin-users/${selfId}`, { method: 'PATCH', body: { isPlatformAdmin: false } })
+  check('不能取消自己的平台管理员', r.status === 422, r.json)
+
   console.log('\n[刷新免登 resume cookie]')
   const resumeToken = /__Secure-adm_resume=([^;]+)/.exec(resumeSetCookie)?.[1] ?? ''
   r = await req(DOMAIN, '/admin-api/auth/resume', { headers: { cookie: `__Secure-adm_resume=${resumeToken}`, 'sec-fetch-mode': 'cors' } })

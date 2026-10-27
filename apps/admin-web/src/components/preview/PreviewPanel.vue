@@ -43,7 +43,11 @@ const device = computed(() => DEVICES.find(d => d.key === deviceKey.value)!)
 const frameW = computed(() => landscape.value ? device.value.h : device.value.w)
 const frameH = computed(() => landscape.value ? device.value.w : device.value.h)
 const scale = computed(() => Math.min(1, (boxSize.value.w - 24) / (frameW.value + 20), (boxSize.value.h - 24) / (frameH.value + 20)))
-const errorCount = computed(() => logs.value.filter(l => l.level === 'error').length)
+/** 本轮 AI 改动还没定型（排队/发送中/运行中/被中断）时不展示报错：这时代码可能是半成品，报错不代表真的有问题 */
+const errorsHidden = computed(() => channel.value === 'dev' && store.aiBusy)
+const visibleLogs = computed(() => errorsHidden.value ? logs.value.filter(l => l.level !== 'error') : logs.value)
+const hiddenErrorCount = computed(() => errorsHidden.value ? logs.value.filter(l => l.level === 'error').length : 0)
+const errorCount = computed(() => visibleLogs.value.filter(l => l.level === 'error').length)
 const host = computed(() => {
   try {
     return new URL(url.value).origin
@@ -255,8 +259,11 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="showConsole" class="h-[calc(100%-38px)] overflow-auto scroll-thin font-mono text-12px">
         <template v-if="consoleTab === 'console'">
+          <div v-if="hiddenErrorCount" class="px-3 py-1.5 text-[var(--muted)] font-sans border-b border-gray-100">
+            本轮改动还没结束，{{ hiddenErrorCount }} 条报错暂不展示
+          </div>
           <div
-            v-for="(l, i) in logs" :key="i"
+            v-for="(l, i) in visibleLogs" :key="i"
             class="group flex gap-2 px-3 py-1 border-b border-gray-100"
             :class="l.level === 'error' ? 'bg-red-50 text-red-700' : l.level === 'warn' ? 'bg-amber-50 text-amber-700' : ''"
           >
@@ -266,7 +273,7 @@ onBeforeUnmount(() => {
               交给 AI
             </el-button>
           </div>
-          <div v-if="!logs.length" class="text-[var(--muted)] p-3 font-sans">
+          <div v-if="!visibleLogs.length && !hiddenErrorCount" class="text-[var(--muted)] p-3 font-sans">
             暂无日志
           </div>
         </template>

@@ -193,7 +193,7 @@ containers:
 ## 5. 首次上线验证
 
 1. `curl -fsS https://apps.example.com/healthz`
-2. 浏览器打开 `https://apps.example.com/admin/`，用飞书登录；首位登录者自动成为平台管理员
+2. 浏览器打开 `https://apps.example.com/admin/`，用飞书登录；首位登录者自动成为平台管理员，之后的人由平台管理员在后台「用户管理」页授予
 3. 新建一个应用，确认预览可打开、AI 对话有响应
 4. 生成测试版 → 发布到线上 → 打开 `/a/{appId}/`
 5. 检查登录：未配置 `requireLogin` 的应用游客可访问；需要身份的操作会拉起主站登录

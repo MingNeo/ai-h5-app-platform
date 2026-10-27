@@ -29,6 +29,8 @@ export const useAppStore = defineStore('app', () => {
   const filesVersion = ref(0)
   /** 预览刷新信号 */
   const previewVersion = ref(0)
+  /** 最近一轮对话还没定型（排队/发送中/运行中/被中断）：预览面板据此暂不展示报错，避免半成品报错误导 */
+  const aiBusy = ref(false)
 
   async function load(appId: string) {
     app.value = await api<AppDetail>(`/apps/${appId}`)
@@ -47,5 +49,5 @@ export const useAppStore = defineStore('app', () => {
 
   const canEdit = () => can('app.edit')
 
-  return { app, pendingAttachments, filesVersion, previewVersion, load, can, canAny, canEdit }
+  return { app, pendingAttachments, filesVersion, previewVersion, aiBusy, load, can, canAny, canEdit }
 })

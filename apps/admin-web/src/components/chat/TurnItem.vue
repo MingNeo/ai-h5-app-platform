@@ -71,13 +71,13 @@ function issuesText(issues: Array<{ file?: string, line?: number, message: strin
       </div>
     </div>
 
-    <!-- 排队中 -->
-    <div v-if="turn.status === 'queued'" class="flex items-center gap-2 text-[var(--muted)] text-13px">
+    <!-- 发送中 / 已发送待开始 / 排队中 -->
+    <div v-if="['sending', 'sent', 'queued'].includes(turn.status)" class="flex items-center gap-2 text-[var(--muted)] text-13px">
       <el-icon class="is-loading">
         <svg viewBox="0 0 1024 1024"><path fill="currentColor" d="M512 64a32 32 0 0 1 32 32v192a32 32 0 0 1-64 0V96a32 32 0 0 1 32-32m0 640a32 32 0 0 1 32 32v192a32 32 0 1 1-64 0V736a32 32 0 0 1 32-32" /></svg>
       </el-icon>
-      排队中，等前面的任务完成后开始
-      <el-button v-if="canEdit" size="small" text type="danger" @click="emit('stop')">
+      {{ turn.status === 'sending' ? '发送中…' : turn.status === 'sent' ? '已发送，等待开始…' : '排队中…' }}
+      <el-button v-if="canEdit && turn.status === 'queued'" size="small" text type="danger" @click="emit('stop')">
         取消
       </el-button>
     </div>

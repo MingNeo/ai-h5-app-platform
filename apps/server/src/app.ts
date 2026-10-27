@@ -17,6 +17,7 @@ import { registerFileRoutes } from './modules/admin/files'
 import { registerGrantRoutes } from './modules/admin/grants'
 import { registerMonitorRoutes } from './modules/admin/monitor'
 import { registerReleaseRoutes } from './modules/admin/release'
+import { registerUserRoutes } from './modules/admin/users'
 import { registerAgentRoutes } from './modules/agent/routes'
 import { registerGateway } from './modules/gateway'
 import { serveAppBuild, serveAppDraft } from './modules/host/app-host'
@@ -57,6 +58,7 @@ export async function buildApp() {
   registerMonitorRoutes(app)
   registerConsoleRoutes(app)
   registerApiClientRoutes(app)
+  registerUserRoutes(app)
   registerGateway(app)
   registerOpenApi(app)
 

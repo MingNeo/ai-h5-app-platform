@@ -352,7 +352,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `GUARD_FORBIDDEN_PACKAGES` | 空 | app-guard 禁止使用的依赖包名列表 |
 | `GUARD_ALLOWED_REDIRECT_HOSTS` | 空 | app-guard 允许的登录兜底跳转域名白名单 |
 | `DEV_ADMIN_BYPASS` | 关闭 | 本地后台免登 |
-| `PLATFORM_ADMINS` | 空 | 平台管理员邮箱/openId 列表 |
+| `PLATFORM_ADMINS` | 空 | 平台管理员邮箱/openId 列表，登录和服务启动时生效；这些账号在后台「用户管理」页不能被取消 |
 | `FEISHU_*` | 空 | 飞书登录与应用通知 |
 | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODELS` | 空 | 未配置时用 mock 模型 |
 | `LLM_DEFAULT_MODEL` / `LLM_SMALL_MODEL` | 首个模型 | 主模型、摘要/变更说明模型 |

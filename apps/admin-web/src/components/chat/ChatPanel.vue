@@ -15,14 +15,18 @@ const store = useAppStore()
 const canEdit = computed(() => store.canEdit())
 
 interface SessionItem { id: string, title: string, updatedAt: string, status: string, usage: { inputTokens: number, outputTokens: number } }
+interface Outgoing { id: string, message: string, attachments: Attachment[], planMode: boolean, model: string }
 const sessions = ref<SessionItem[]>([])
 const todayTokens = ref(0)
 const currentId = ref<string | null>(null)
 const reducer = new TurnReducer()
 const turns = shallowRef<TurnView[]>([])
 /** 本地排队：当前轮次跑完才真正发出 */
-const queue = ref<Array<{ id: string, message: string, attachments: Attachment[], planMode: boolean, model: string }>>([])
-let flushing = false
+const queue = ref<Outgoing[]>([])
+/** 正在发出的那一条：先在对话里占位，服务端轮次到达后原位替换，避免「发了看不到」 */
+const sending = shallowRef<(Outgoing & { known: Set<string>, turnId?: string }) | null>(null)
+let outgoingSeq = 0
+let openSeq = 0
 const loadingSession = ref(false)
 const agentCfg = ref<{ configured: boolean, models: string[], defaultModel: string, visionModels: string[], contextTokens: number } | null>(null)
 const model = ref('')
@@ -35,6 +39,20 @@ let stickToBottom = true
 
 const running = computed(() => turns.value.some(t => t.status === 'running' || t.status === 'queued'))
 const runningTurn = computed(() => turns.value.find(t => t.status === 'running') ?? turns.value.find(t => t.status === 'queued'))
+
+function placeholderTurn(s: NonNullable<typeof sending.value>): TurnView {
+  return { id: s.id, message: s.message, attachments: s.attachments, planMode: s.planMode, status: s.turnId ? 'sent' : 'sending', segments: [], todos: [], changes: [] }
+}
+/** 发送中的占位轮次拼在真实轮次后面；真实轮次到达后 watch(turns) 原位替换，界面上不会出现两条 */
+const shownTurns = computed<TurnView[]>(() => sending.value ? [...turns.value, placeholderTurn(sending.value)] : turns.value)
+/** 最新一轮还没定型（排队/发送中/运行中/被中断）时，预览面板暂不展示报错，避免半成品报错误导 */
+const lastTurnBlocking = computed(() => {
+  const list = shownTurns.value
+  const status = list[list.length - 1]?.status
+  return status === 'sending' || status === 'sent' || status === 'queued' || status === 'running' || status === 'stopped'
+})
+watch(lastTurnBlocking, v => { store.aiBusy = v }, { immediate: true })
+
 const contextPct = computed(() => {
   const last = [...turns.value].reverse().find(t => t.usage?.inputTokens)
   if (!last?.usage || !agentCfg.value)
@@ -69,22 +87,33 @@ async function loadSessions() {
   todayTokens.value = res.todayTokens
 }
 
-async function openSession(id: string) {
+/** created：刚为发送首条消息顺带建的空会话，跳过加载遮罩，也不清本地队列/占位 */
+async function openSession(id: string, created = false) {
+  const seq = ++openSeq
   unsub?.()
+  unsub = null
   currentId.value = id
-  loadingSession.value = true
   reducer.reset()
   turns.value = []
-  queue.value = []
-  try {
-    const res = await api<{ events: AgentEvent[] }>(`/sessions/${id}/events`)
-    for (const ev of res.events)
-      reducer.apply(ev)
-    turns.value = reducer.turns
+  if (!created) {
+    queue.value = []
+    sending.value = null
+    loadingSession.value = true
+    try {
+      const res = await api<{ events: AgentEvent[] }>(`/sessions/${id}/events`)
+      if (seq !== openSeq)
+        return
+      for (const ev of res.events)
+        reducer.apply(ev)
+      turns.value = reducer.turns
+    }
+    finally {
+      if (seq === openSeq)
+        loadingSession.value = false
+    }
   }
-  finally {
-    loadingSession.value = false
-  }
+  if (seq !== openSeq)
+    return
   stickToBottom = true
   scrollToBottom()
   unsub = subscribeSse(`/sessions/${id}/stream`, (ev: AgentEvent) => {
@@ -113,7 +142,8 @@ async function newSession() {
 async function ensureSession() {
   if (currentId.value)
     return currentId.value
-  await newSession()
+  const s = await api<{ id: string }>(`/apps/${props.appId}/sessions`, { body: {} })
+  await openSession(s.id, true)
   return currentId.value!
 }
 
@@ -131,57 +161,73 @@ async function remove(s: SessionItem) {
     currentId.value = null
     reducer.reset()
     turns.value = []
+    queue.value = []
+    sending.value = null
   }
   await loadSessions()
 }
 
-async function send(payload: { message: string, attachments: Attachment[], planMode: boolean, model: string }) {
-  queue.value = [...queue.value, { ...payload, id: `q${Date.now()}${queue.value.length}` }]
+function send(payload: { message: string, attachments: Attachment[], planMode: boolean, model: string }) {
+  const message = payload.message.trim()
+  if (!message)
+    return
+  queue.value = [...queue.value, { ...payload, message, id: `q${++outgoingSeq}` }]
   void flush()
 }
 
-/** 一次只放出去一条：等服务端确认这一轮已在跑（running），再放下一轮 */
+/** 一次只放出去一条：取出队首立刻占位显示，服务端轮次到达后再放下一条 */
 async function flush() {
-  if (flushing)
+  if (sending.value || running.value || !queue.value.length)
     return
-  flushing = true
+  const item = queue.value[0]!
+  queue.value = queue.value.slice(1)
+  sending.value = { ...item, known: new Set(turns.value.map(t => t.id)) }
+  stickToBottom = true
+  scrollToBottom()
   try {
-    while (queue.value.length) {
-      if (running.value)
-        return
-      const item = queue.value[0]!
-      try {
-        await post(item)
-      }
-      catch {
-        queue.value = queue.value.filter(q => q.id !== item.id)
-        continue
-      }
-      queue.value = queue.value.filter(q => q.id !== item.id)
-      // 排队事件到达前 running 还是 false，等它一下，否则下一条会被立刻发出去
-      const deadline = Date.now() + 3000
-      while (!running.value && Date.now() < deadline)
-        await new Promise(r => setTimeout(r, 100))
-    }
+    const turnId = await post(item)
+    const s = sending.value
+    if (s?.id === item.id)
+      sending.value = turns.value.some(t => t.id === turnId) ? null : { ...s, turnId }
   }
-  finally {
-    flushing = false
+  catch {
+    // 期间切过会话就只放回这一条；否则把这条和还没发出的一起按顺序放回输入框
+    const mine = sending.value?.id === item.id
+    const back = mine ? [item, ...queue.value] : [item]
+    if (mine) {
+      sending.value = null
+      queue.value = []
+    }
+    composerRef.value?.restore(back)
   }
 }
 
-async function post(payload: { message: string, attachments: Attachment[], planMode: boolean, model: string }) {
+async function post(payload: Outgoing): Promise<string> {
+  const created = !currentId.value
   const sid = await ensureSession()
-  stickToBottom = true
-  await api(`/sessions/${sid}/messages`, { body: payload })
-  scrollToBottom()
+  try {
+    const res = await api<{ turnId: string }>(`/sessions/${sid}/messages`, { body: { message: payload.message, attachments: payload.attachments, planMode: payload.planMode, model: payload.model } })
+    return res.turnId
+  }
+  finally {
+    if (created)
+      void loadSessions()
+  }
 }
 
 function cancelQueued(id: string) {
   queue.value = queue.value.filter(q => q.id !== id)
 }
 
-watch(running, (now) => {
-  if (!now)
+// 真实轮次到达后清掉占位；SSE 常常比发送请求的响应先到，这时还不知道 turnId，按内容在排队/运行中的新轮次认领
+watch(turns, (list) => {
+  const s = sending.value
+  if (s && list.some(t => t.id === s.turnId || (!s.known.has(t.id) && t.message === s.message && (t.status === 'queued' || t.status === 'running'))))
+    sending.value = null
+})
+// 上一轮推送到、真的跑完后，再放下一条排队的消息
+watch(() => !sending.value && !running.value, (idle) => {
+  if (idle)
     void flush()
 })
 
@@ -328,7 +374,7 @@ onBeforeUnmount(() => unsub?.())
       <el-alert v-if="agentCfg && !agentCfg.configured" type="warning" :closable="false" title="平台未配置模型服务（LLM_BASE_URL），暂时无法使用 AI" />
       <div ref="scroller" v-loading="loadingSession" class="flex-1 overflow-auto scroll-thin" @scroll="onScroll">
         <div class="max-w-780px mx-auto px-6 py-6 flex flex-col gap-7">
-          <template v-if="!turns.length && !loadingSession">
+          <template v-if="!shownTurns.length && !loadingSession">
             <div class="text-center mt-10">
               <div class="text-20px font-600">
                 想做一个什么样的应用？
@@ -351,7 +397,7 @@ onBeforeUnmount(() => unsub?.())
             </div>
           </template>
           <TurnItem
-            v-for="t in turns" :key="t.id" :turn="t" :can-edit="canEdit"
+            v-for="t in shownTurns" :key="t.id" :turn="t" :can-edit="canEdit"
             @stop="stopTurn(t)" @revert="revert(t)" @rollback="rollback(t)" @resend="resend(t)"
             @execute-plan="executePlan" @diff="(p?: string) => diff(t, p)" @fix-issues="fixIssues"
           />

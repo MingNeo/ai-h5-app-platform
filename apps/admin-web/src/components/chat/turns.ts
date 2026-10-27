@@ -23,7 +23,8 @@ export interface TurnView {
   attachments: Attachment[]
   planMode: boolean
   model?: string
-  status: TurnStatus
+  /** 'sending'/'sent' 是本地占位状态（发出中 / 服务端已收下但轮次还没推送到），不来自服务端 */
+  status: TurnStatus | 'sending' | 'sent'
   segments: Segment[]
   todos: TodoItem[]
   usage?: TurnUsage

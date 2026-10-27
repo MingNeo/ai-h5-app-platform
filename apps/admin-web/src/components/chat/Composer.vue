@@ -27,13 +27,16 @@ const pickerItems = ref<Array<{ value: string, label: string }>>([])
 const picked = ref<string[]>([])
 const imageInput = ref<HTMLInputElement>()
 
+function addAttachment(a: Attachment) {
+  if (!attachments.value.some(x => x.type === a.type && x.value === a.value))
+    attachments.value.push(a)
+}
+
 watch(() => store.pendingAttachments.length, () => {
   if (!store.pendingAttachments.length)
     return
-  for (const a of store.pendingAttachments.splice(0)) {
-    if (!attachments.value.some(x => x.type === a.type && x.value === a.value))
-      attachments.value.push(a)
-  }
+  for (const a of store.pendingAttachments.splice(0))
+    addAttachment(a)
   if (!text.value && attachments.value.some(a => a.type === 'error'))
     text.value = '预览里出现了下面的报错，请帮我修复'
 }, { immediate: true })
@@ -113,6 +116,17 @@ function compressImage(file: File): Promise<string> {
 defineExpose({
   setText(t: string) {
     text.value = t
+  },
+  /** 发送失败时把内容放回输入框：按原顺序把消息接在已输入内容前面，引用和方案开关一并恢复 */
+  restore(items: Array<{ message: string, attachments: Attachment[], planMode: boolean }>) {
+    if (!items.length)
+      return
+    text.value = [...items.map(i => i.message), text.value.trim()].filter(Boolean).join('\n\n')
+    for (const i of items) {
+      for (const a of i.attachments)
+        addAttachment(a)
+    }
+    planMode.value = items[0]!.planMode
   },
 })
 </script>
