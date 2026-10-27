@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AclPreset } from '@app-platform/shared'
+import { ACL_DESCRIPTIONS, ACL_OPENNESS, ACL_PRESETS } from '@app-platform/shared'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { computed, onMounted, ref, watch } from 'vue'
 import { api, download } from '../../api'
@@ -10,6 +12,8 @@ const env = ref<'dev' | 'prod'>('dev')
 const canWrite = computed(() => env.value === 'dev' ? store.can('data.write.dev') : store.can('data.write.prod'))
 const canExport = computed(() => store.can('data.export'))
 const canSync = computed(() => store.can('data.export', 'data.write.prod'))
+const canEditAcl = computed(() => env.value === 'dev' && store.canEdit())
+const savingAcl = ref(false)
 
 interface ColInfo { name: string, acl: string, description: string, fields: Record<string, any>, count: number }
 const collections = ref<ColInfo[]>([])
@@ -118,6 +122,29 @@ async function syncToProd() {
   ElMessage.success(`已同步 ${res.rows} 条`)
 }
 
+async function changeAcl(acl: AclPreset) {
+  const col = currentCol.value
+  if (!col || col.acl === acl)
+    return
+  if (ACL_OPENNESS[acl as AclPreset] > ACL_OPENNESS[col.acl as AclPreset]) {
+    try {
+      await ElMessageBox.confirm(`权限将从「${ACL_LABEL[col.acl]}」放宽为「${ACL_LABEL[acl]}」：${ACL_DESCRIPTIONS[acl]}。确认修改？`, '放宽权限', { type: 'warning' })
+    }
+    catch {
+      return
+    }
+  }
+  savingAcl.value = true
+  try {
+    await api(`/apps/${appId}/collections/${encodeURIComponent(col.name)}/acl`, { method: 'PUT', body: { acl } })
+    await loadCollections()
+    ElMessage.success('已保存，发布后生效')
+  }
+  finally {
+    savingAcl.value = false
+  }
+}
+
 async function saveKv() {
   let value: unknown
   try {
@@ -212,9 +239,25 @@ onMounted(loadCollections)
       <template v-if="currentCol">
         <div class="flex items-center gap-2 mb-3">
           <span class="font-600">{{ currentCol.name }}</span>
-          <el-tag size="small">
+          <el-select
+            v-if="canEditAcl"
+            :model-value="currentCol.acl"
+            size="small"
+            class="w-130px"
+            :disabled="savingAcl"
+            @change="changeAcl"
+          >
+            <el-option v-for="p in ACL_PRESETS" :key="p" :value="p" :label="ACL_LABEL[p]">
+              <div class="flex flex-col py-1">
+                <span>{{ ACL_LABEL[p] }}</span>
+                <span class="text-12px text-[var(--muted)]">{{ ACL_DESCRIPTIONS[p] }}</span>
+              </div>
+            </el-option>
+          </el-select>
+          <el-tag v-else size="small">
             {{ ACL_LABEL[currentCol.acl] }}
           </el-tag>
+          <span v-if="env === 'prod'" class="text-12px text-[var(--muted)]">修改权限请切到测试数据，发布后生效</span>
           <span class="text-13px text-[var(--muted)]">共 {{ total }} 条</span>
           <span class="flex-1" />
           <el-radio-group v-model="mode" size="small">

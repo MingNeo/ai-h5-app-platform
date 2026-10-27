@@ -86,10 +86,11 @@ function parseContainers(raw: string | undefined): NativeContainer[] {
 
 const nativeContainers = parseContainers(env.APP_CONTAINERS)
 
-const authProvider = (env.AUTH_PROVIDER || 'mock') as 'mock' | 'main-site'
+// 默认走线上行为（复用主站登录）；本地开发在 .env.local 里显式设为 mock 才会模拟登录
+const authProvider = (env.AUTH_PROVIDER || 'main-site') as 'mock' | 'main-site'
 const authUserInfoUrl = env.AUTH_USERINFO_URL || ''
 if (authProvider === 'main-site' && !authUserInfoUrl)
-  throw new Error('AUTH_PROVIDER=main-site 时必须配置 AUTH_USERINFO_URL（主站用户信息接口）')
+  throw new Error('AUTH_PROVIDER=main-site 时必须配置 AUTH_USERINFO_URL（主站用户信息接口）；本地开发请在 .env.local 设置 AUTH_PROVIDER=mock')
 
 export const config = {
   repoRoot: REPO_ROOT,

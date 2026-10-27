@@ -104,6 +104,9 @@ async function remove() {
             <el-switch v-model="loginForm.requireLogin" :disabled="!store.canEdit()" />
             <span class="text-13px text-[var(--muted)]">{{ loginForm.requireLogin ? '打开应用前必须先登录' : '游客可先浏览，按需登录' }}</span>
           </div>
+          <div class="text-12px text-[var(--muted)] mt-1">
+            关闭后，数据集合的权限仍会要求登录才能读写，请到「数据」页调整具体集合的权限
+          </div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :disabled="!store.canEdit()" :loading="savingLogin" @click="saveLogin">

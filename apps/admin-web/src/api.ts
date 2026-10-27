@@ -105,14 +105,40 @@ export async function download(path: string, fallbackName = 'export.csv') {
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
-/** 订阅 SSE（fetch 实现，支持自定义头与断线重连） */
+/**
+ * 订阅 SSE（fetch 实现，支持自定义头与断线重连）。
+ * App 切后台时系统会把这条流挂起：不报错也不 done，`reader.read()` 永远不 resolve，
+ * 原生的"抛错才重连"逻辑就会卡死。所以加两道保险：
+ * 1. 空闲看门狗：超过 IDLE_TIMEOUT 没收到任何字节（含心跳 ping）就强制 abort 重连；
+ * 2. 回前台探测：visibilitychange/pageshow 一触发就强制 abort 重连一次，不等它自己报错。
+ */
 export function subscribeSse(path: string, onEvent: (data: any) => void, getAfter: () => number) {
   let stopped = false
   let ctrl: AbortController | null = null
+  const IDLE_TIMEOUT = 40_000 // 服务端心跳 15s 一次，留 2+ 个心跳的余量
+  let lastActivity = Date.now()
+  let wake: (() => void) | null = null
+
+  const kick = () => {
+    ctrl?.abort()
+    wake?.()
+  }
+  const onForeground = () => {
+    if (document.visibilityState === 'visible')
+      kick()
+  }
+  document.addEventListener('visibilitychange', onForeground)
+  window.addEventListener('pageshow', onForeground)
+  const watchdog = setInterval(() => {
+    if (!stopped && Date.now() - lastActivity > IDLE_TIMEOUT)
+      kick()
+  }, 5000)
+
   const loop = async () => {
     let delay = 1000
     while (!stopped) {
       ctrl = new AbortController()
+      lastActivity = Date.now()
       try {
         const token = getToken()
         const res = await fetch(`/admin-api${path}?after=${getAfter()}`, {
@@ -122,6 +148,7 @@ export function subscribeSse(path: string, onEvent: (data: any) => void, getAfte
         if (!res.ok || !res.body)
           throw new Error(String(res.status))
         delay = 1000
+        lastActivity = Date.now()
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buf = ''
@@ -129,6 +156,7 @@ export function subscribeSse(path: string, onEvent: (data: any) => void, getAfte
           const { done, value } = await reader.read()
           if (done)
             break
+          lastActivity = Date.now()
           buf += decoder.decode(value, { stream: true })
           let i: number
           while ((i = buf.indexOf('\n\n')) >= 0) {
@@ -148,7 +176,11 @@ export function subscribeSse(path: string, onEvent: (data: any) => void, getAfte
         if (stopped)
           return
       }
-      await new Promise(r => setTimeout(r, delay))
+      await new Promise<void>((resolve) => {
+        wake = resolve
+        setTimeout(resolve, delay)
+      })
+      wake = null
       delay = Math.min(delay * 2, 10000)
     }
   }
@@ -156,5 +188,9 @@ export function subscribeSse(path: string, onEvent: (data: any) => void, getAfte
   return () => {
     stopped = true
     ctrl?.abort()
+    wake?.()
+    clearInterval(watchdog)
+    document.removeEventListener('visibilitychange', onForeground)
+    window.removeEventListener('pageshow', onForeground)
   }
 }

@@ -1,4 +1,4 @@
-import { APP_PERMS, APP_ROLES, type AppPerm, appUrl, MANIFEST_FILE, permsOf, ROLE_PERMS, validateAppId } from '@app-platform/shared'
+import { ACL_PRESETS, APP_PERMS, APP_ROLES, type AppPerm, appUrl, MANIFEST_FILE, permsOf, ROLE_PERMS, validateAppId } from '@app-platform/shared'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { config } from '../../config'
@@ -10,6 +10,22 @@ import { ok, parseBody } from '../../lib/http'
 import { type AppDoc, col } from '../../lib/mongo'
 import { newId } from '../../lib/tokens'
 import { appAccess, requireAdmin, requirePerm } from './auth'
+
+async function readDraftManifestObject(appId: string): Promise<Record<string, any>> {
+  const text = await readDraftText(appId, MANIFEST_FILE)
+  if (text === null)
+    throw err.notFound('缺少 manifest.json')
+  let manifest: unknown
+  try {
+    manifest = JSON.parse(text)
+  }
+  catch {
+    throw err.invalid('manifest.json 不是合法的 JSON，请先在代码里修正')
+  }
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest))
+    throw err.invalid('manifest.json 内容需要是对象')
+  return manifest as Record<string, any>
+}
 
 export function appUrls(appId: string) {
   return {
@@ -154,24 +170,32 @@ export function registerAppRoutes(app: FastifyInstance) {
     const { appId } = req.params as { appId: string }
     const { user } = await requirePerm(req, appId, 'app.edit')
     const { requireLogin } = parseBody(z.object({ requireLogin: z.boolean() }), req.body)
-    const text = await readDraftText(appId, MANIFEST_FILE)
-    if (text === null)
-      throw err.notFound('缺少 manifest.json')
-    let manifest: Record<string, unknown>
-    try {
-      manifest = JSON.parse(text)
-    }
-    catch {
-      throw err.invalid('manifest.json 不是合法的 JSON，请先在代码里修正')
-    }
-    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest))
-      throw err.invalid('manifest.json 内容需要是对象')
+    const manifest = await readDraftManifestObject(appId)
     if (manifest.requireLogin === requireLogin)
       return ok({ requireLogin })
     manifest.requireLogin = requireLogin
     await writeDraft(appId, MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`, { userId: user._id })
     audit(user._id, 'app.requireLogin', appId, { requireLogin })
     return ok({ requireLogin })
+  })
+
+  // 数据集合的访问权限（acl）同样来自 manifest.json，这里做便捷开关（改草稿文件，随发布生效）
+  app.put('/admin-api/apps/:appId/collections/:name/acl', async (req) => {
+    const { appId, name } = req.params as { appId: string, name: string }
+    const { user } = await requirePerm(req, appId, 'app.edit')
+    const { acl } = parseBody(z.object({ acl: z.enum(ACL_PRESETS) }), req.body)
+    const manifest = await readDraftManifestObject(appId)
+    const collections = manifest.collections as Record<string, { acl?: string }> | undefined
+    const col = collections?.[name]
+    if (!col)
+      throw err.notFound(`集合 ${name} 不存在`)
+    if (col.acl === acl)
+      return ok({ acl })
+    const from = col.acl
+    col.acl = acl
+    await writeDraft(appId, MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`, { userId: user._id })
+    audit(user._id, 'app.collectionAcl', appId, { collection: name, from, to: acl })
+    return ok({ acl })
   })
 
   app.delete('/admin-api/apps/:appId', async (req) => {
