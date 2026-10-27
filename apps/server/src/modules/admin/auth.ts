@@ -179,7 +179,9 @@ export async function syncPlatformAdmins() {
 
 async function upsertUser(info: { openId: string, name: string, avatar: string, email: string }) {
   const isListed = isConfiguredAdmin(info.email, info.openId)
-  const first = (await col.adminUsers.estimatedDocumentCount()) === 0
+  // 「首位登录者自动成为平台管理员」只在完全没配置 PLATFORM_ADMINS 时才兜底（纯本地/演示环境），
+  // 一旦配置了白名单，谁都不能靠「抢先登录」绕过去——否则任何能登上飞书的人都可能抢到平台管理员。
+  const first = config.admin.platformAdmins.length === 0 && (await col.adminUsers.estimatedDocumentCount()) === 0
   const now = new Date()
   const existing = await col.adminUsers.findOne({ feishuOpenId: info.openId })
   if (existing) {
@@ -381,7 +383,7 @@ export function registerAdminAuth(app: FastifyInstance) {
       avatar: info.data.avatar_url ?? '',
       email: info.data.enterprise_email || info.data.email || '',
     })
-    audit(id, 'admin.login', undefined, { via: 'feishu' })
+    audit(id, 'admin.login', undefined, { via: 'feishu', tenantKey: info.data.tenant_key })
     await issueResume(reply, id)
     // fragment 不会发给服务端，也不会出现在 Referer；前端兑换后立即清掉
     const ticket = await issueLoginTicket(id)

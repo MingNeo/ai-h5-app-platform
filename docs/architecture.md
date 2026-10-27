@@ -127,6 +127,8 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 - 角色：平台管理员、应用 `owner` / `developer` / `publisher` / `data` / `operator` / `viewer`。平台管理员对所有应用等价于 owner。
 - 鉴权按权限位（`APP_PERMS`，[permissions.ts](../packages/shared/src/permissions.ts)）判断，角色只是预置权限包：`owner` 全量、`developer` 开发与测试数据、`publisher` 发布回滚、`data` 数据读写导出、`operator` 只看后台视图与监控、`viewer` 还可读任意集合。成员文档的 `perms` 可覆盖角色包。
 - 读数据时，只有 `console.view` 的人只能读 `admin.json` 引用的集合，`data.read` 才能读任意已声明集合。
+- 新登录的人默认零权限：不是平台管理员也没加入任何应用成员时，应用列表是空的，看不到任何应用或数据，要靠平台管理员在「用户管理」/「成员」页手动授权。唯一的自动授权例外是 `PLATFORM_ADMINS` 留空时的「首位登录者」兜底，见上方 `PLATFORM_ADMINS` 一行。
+- 入口域名的裸根路径（没有 `/admin`、`/a/{appId}` 等前缀）返回空白页，不会自动跳转到 `/admin/`，避免把后台入口暴露给普通访问者。
 
 ### 应用端
 
@@ -352,7 +354,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `GUARD_FORBIDDEN_PACKAGES` | 空 | app-guard 禁止使用的依赖包名列表 |
 | `GUARD_ALLOWED_REDIRECT_HOSTS` | 空 | app-guard 允许的登录兜底跳转域名白名单 |
 | `DEV_ADMIN_BYPASS` | 关闭 | 本地后台免登 |
-| `PLATFORM_ADMINS` | 空 | 平台管理员邮箱/openId 列表，登录和服务启动时生效；这些账号在后台「用户管理」页不能被取消 |
+| `PLATFORM_ADMINS` | 空 | 平台管理员邮箱/openId 列表，登录和服务启动时生效；这些账号在后台「用户管理」页不能被取消。**留空时第一个登录的人自动成为平台管理员**（仅全新部署兜底用）；一旦配置了这项，这条兜底立即失效，没在列表里的人登录只会拿到零权限账号 |
 | `FEISHU_*` | 空 | 飞书登录与应用通知 |
 | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODELS` | 空 | 未配置时用 mock 模型 |
 | `LLM_DEFAULT_MODEL` / `LLM_SMALL_MODEL` | 首个模型 | 主模型、摘要/变更说明模型 |

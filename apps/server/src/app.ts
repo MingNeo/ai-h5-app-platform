@@ -70,9 +70,11 @@ export async function buildApp() {
       const site = req.site
       if (!site) {
         const host = req.headers.host?.split(':')[0]?.toLowerCase()
-        if (host && (host === config.baseDomain || config.devHosts.includes(host)) && req.url.split('?')[0] === '/')
-          return reply.redirect('/admin/')
-        return reply.status(404).type('text/plain; charset=utf-8').send(`资源不存在：请使用入口域名 ${config.baseDomain}`)
+        const isEntryHost = Boolean(host && (host === config.baseDomain || config.devHosts.includes(host)))
+        // 入口域名的裸根路径：不暴露后台入口，普通访问者看到空白页，不自动跳 /admin/
+        if (isEntryHost && req.url.split('?')[0] === '/')
+          return reply.status(200).type('text/html; charset=utf-8').send('<!doctype html><title></title>')
+        return reply.status(404).type('text/plain; charset=utf-8').send(isEntryHost ? '资源不存在' : `资源不存在：请使用入口域名 ${config.baseDomain}`)
       }
       if (site.kind === 'admin')
         return serveAdmin(req.url, reply)

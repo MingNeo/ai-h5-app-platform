@@ -47,8 +47,8 @@ DEV_ADMIN_BYPASS=0
 ```bash
 FEISHU_APP_ID=cli_xxx
 FEISHU_APP_SECRET=xxx
-FEISHU_TENANT_KEY=xxx                   # 只允许本企业登录；留空则不校验
-PLATFORM_ADMINS=ops@example.com         # 邮箱或 open_id，逗号分隔；首位登录者也会自动成为平台管理员
+FEISHU_TENANT_KEY=xxx                   # 强烈建议配置：留空时任何飞书账号（含个人版）都能登录，拿到一个「零权限」账号；配置后只允许本企业 tenant_key 登录
+PLATFORM_ADMINS=ops@example.com         # 邮箱或 open_id，逗号分隔；配了这项之后「首位登录者自动成为平台管理员」这条兜底会直接失效，只有列表里的人才能拿到平台管理员
 FEISHU_BOT_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx   # 可选，发布通知
 ```
 
@@ -57,6 +57,8 @@ FEISHU_BOT_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx   # 可选�
 ```
 https://apps.example.com/admin-api/auth/feishu/callback
 ```
+
+**找 `FEISHU_TENANT_KEY`**：不知道本企业 `tenant_key` 时，先留空用任意飞书账号登录一次，到后台「审计日志」页找 `admin.login` 这条记录，`detail.tenantKey` 就是当前账号的租户标识；确认是公司账号登录产生的，填进去后其他租户（包括个人版飞书）就登录不了了。
 
 **应用端登录（复用主站账号）**
 
