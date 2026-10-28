@@ -1,0 +1,18 @@
+{
+  "gitQuickMerge.branches": [
+    "develop",
+    "release",
+    "master",
+    "main"
+  ],
+
+  "gitQuickMerge.mergePresets": [
+    {
+      "name": "release&master",
+      "branches": [
+        "release",
+        { "from": "release", "to": "master"}
+      ]
+    }
+  ],
+}
