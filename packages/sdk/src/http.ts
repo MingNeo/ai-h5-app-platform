@@ -1,4 +1,4 @@
-import { config } from './config'
+import { BOOT_MISSING_MESSAGE, config, isBootLoaded } from './config'
 import { type ErrorCode, PlatformError, isPlatformError } from './errors'
 
 type LoginHandler = () => Promise<unknown>
@@ -41,6 +41,11 @@ export interface ApiInit {
 
 /** 调用平台网关（同源），不处理登录 */
 export async function rawApi<T>(path: string, init: ApiInit = {}): Promise<T> {
+  // 配置缺失时绝不能“猜”一个渠道发请求，否则可能读到测试环境的数据
+  if (!isBootLoaded) {
+    console.error(`[platform] ${BOOT_MISSING_MESSAGE}`)
+    throw new PlatformError('INTERNAL_ERROR', BOOT_MISSING_MESSAGE)
+  }
   const method = init.method ?? (init.body === undefined && init.rawBody === undefined ? 'GET' : 'POST')
   const url = `${config.apiBase}${path}`
   const headers: Record<string, string> = { 'X-App-SDK': '1', 'X-App-Id': config.appId, 'X-App-Channel': config.channel }

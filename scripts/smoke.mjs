@@ -80,10 +80,11 @@ const admin = (path, opts = {}) => req(DOMAIN, `/admin-api${path}`, {
 })
 const appBase = ch => `/a/${APP}${ch === 'prod' ? '' : `--${ch}`}`
 const appReq = (ch, path, opts = {}) => req(DOMAIN, `${appBase(ch)}${path}`, opts)
+/** 平台网关要求请求来源（Referer）与声明的应用、渠道完全一致 */
 const appApi = (ch, path, opts = {}) => req(DOMAIN, `/__platform/api${path}`, {
   ...opts,
   jar: opts.jar ?? devJar,
-  headers: { 'x-app-sdk': '1', 'x-app-id': APP, 'x-app-channel': ch, ...opts.headers },
+  headers: { 'referer': `https://${DOMAIN}${appBase(ch)}/`, 'x-app-sdk': '1', 'x-app-id': APP, 'x-app-channel': ch, ...opts.headers },
 })
 
 function check(name, cond, extra) {
@@ -183,7 +184,7 @@ async function main() {
   check('原子类运行时可用', r.status === 200 && r.text.includes('tailwind'), r.text.slice(0, 120))
   r = await req(DOMAIN, '/__platform/ui.js')
   check('平台交互工具可用', r.status === 200 && r.text.includes('export function toast'), r.text.slice(0, 120))
-  r = await req(DOMAIN, `/__platform/boot.js?app=${APP}&channel=dev`, { jar: devJar })
+  r = await req(DOMAIN, `/__platform/boot.js?app=${APP}&channel=dev`, { jar: devJar, headers: { 'referer': `https://${DOMAIN}${appBase('dev')}/` } })
   check('SDK 注入配置', r.status === 200 && r.text.includes('window.__APP_CONFIG__') && r.text.includes(`"appId":"${APP}"`), r.text.slice(0, 200))
 
   console.log('\n[AI 对话（mock 模型）]')
@@ -212,8 +213,14 @@ async function main() {
   const [optA, optB] = options
 
   console.log('\n[网关：登录拦截、ACL、唯一约束]')
-  r = await req(DOMAIN, '/__platform/api/auth/me', { headers: { 'x-app-id': APP, 'x-app-channel': 'dev' } })
+  r = await req(DOMAIN, '/__platform/api/auth/me', { headers: { 'referer': `https://${DOMAIN}${appBase('dev')}/`, 'x-app-id': APP, 'x-app-channel': 'dev' } })
   check('缺少 SDK 头被拒', r.status === 403)
+  r = await req(DOMAIN, '/__platform/api/auth/me', { jar: devJar, headers: { 'x-app-sdk': '1', 'x-app-id': APP, 'x-app-channel': 'dev' } })
+  check('缺少页面来源被拒', r.status === 403, r.json)
+  r = await appApi('dev', '/auth/me', { headers: { 'referer': `https://${DOMAIN}${appBase('prod')}/` } })
+  check('页面来源与渠道不一致被拒', r.status === 403, r.json)
+  r = await appApi('dev', '/auth/me', { headers: { 'referer': `https://${DOMAIN}/a/other--dev/` } })
+  check('页面来源的应用不一致被拒', r.status === 403, r.json)
   r = await appApi('dev', '/auth/me', { headers: { 'sec-fetch-site': 'cross-site' } })
   check('跨站调用被拒', r.status === 403)
   r = await appApi('dev', '/auth/me')

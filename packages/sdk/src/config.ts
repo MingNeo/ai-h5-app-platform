@@ -47,9 +47,25 @@ declare global {
   }
 }
 
-export const config: BootConfig = window.__APP_CONFIG__ ?? {
-  appId: 'unknown',
-  channel: 'dev',
+const boot = window.__APP_CONFIG__
+
+/** 复制一份：应用代码改 window.__APP_CONFIG__ 不能影响 SDK 已确定的渠道 */
+function cloneBoot(b: BootConfig): BootConfig {
+  try {
+    return JSON.parse(JSON.stringify(b)) as BootConfig
+  }
+  catch {
+    return { ...b }
+  }
+}
+
+/**
+ * boot.js 注入的启动配置。缺失或渠道非法时不做任何猜测：
+ * 平台接口一律拒绝，避免回退到错误的（测试）环境。
+ */
+export const config: BootConfig = Object.freeze(boot ? cloneBoot(boot) : {
+  appId: '',
+  channel: '' as BootConfig['channel'],
   version: '0',
   sdkVersion: '1',
   requireLogin: false,
@@ -58,6 +74,14 @@ export const config: BootConfig = window.__APP_CONFIG__ ?? {
   biz: { prefixes: [], unauthCodes: [401] },
   login: { loginOrigin: '', loginMobileOrigin: '', fromActivity: '' },
   native: { containers: [] },
-}
+}) as BootConfig
 
-export const isPreview = config.channel !== 'prod'
+/** 启动配置是否有效；无效时 SDK 不发出任何平台请求（只看内部副本，不受页面后续改写影响） */
+export const isBootLoaded = Boolean(
+  config.appId
+  && (config.channel === 'prod' || config.channel === 'beta' || config.channel === 'dev'),
+)
+
+export const BOOT_MISSING_MESSAGE = '应用启动配置未加载（/__platform/boot.js 未执行成功），已阻止平台接口请求'
+
+export const isPreview = isBootLoaded && config.channel !== 'prod'

@@ -63,13 +63,18 @@
 
 ### 3.2 预览隔离
 
-- 预览票据与 cookie 都带 `appId`，读取时校验。
-- 预览 cookie 每个应用一个名字（`__Host-app_preview__{appId}`），避免同时预览多个应用互相覆盖。
+- 预览票据与 cookie 都带 `appId` 与 `channel`，读取时逐项校验；渠道不匹配一律无效。
+- 预览 cookie 每个「应用 × 渠道」一个名字（`__Host-app_preview__{appId}__{channel}`），避免同时预览多个应用/渠道互相覆盖。
+- 预览 cookie 不能用于 `prod` 渠道；`prod` 也不签发预览票据与 cookie。
 - 预览仍要求登录后台时签发的票据，应用之间不能互相预览未发布草稿（claims 校验）。
 
 ### 3.3 平台接口
 
-- appId 来自 SDK 请求头（`X-App-Id` / `X-App-Channel`）或查询参数。**这是可伪造的**，按已接受的风险处理；服务端仍用它做 ACL、授权、限流、审计。
+- appId 与渠道来自 SDK 请求头（`X-App-Id` / `X-App-Channel`）或查询参数，但**必须与请求来源页面（`Referer`）路径解析出的应用、渠道完全一致**。缺失 `Referer`、解析失败或任一项不一致，一律 403。
+  - 因此线上页面无法读写测试库、测试页面也无法读写线上库：请求头可以伪造，但来源页面伪造不了。
+  - 不存在缺省渠道：`X-App-Channel` 缺失或非法直接拒绝，不再回退到 `prod` / `dev`。
+  - 这条约束要求应用发出的请求带 `Referer`。应用不要设置 `referrerpolicy="no-referrer"`，也不要用 `fetch(..., { referrer: '' })`。
+- SDK 在 `window.__APP_CONFIG__` 缺失或渠道非法时，会拒绝所有平台接口请求并在控制台报错，不会猜一个渠道继续发请求。
 - 写操作默认必须登录；例外是集合 ACL 显式设为 `public_write` 时，游客可以新增并改删自己设备提交的记录。游客身份来自 `app_vid` cookie，缺省时退回 `ip:<IP>`，可用于按设备配额和限流，但不是可信身份。按用户隔离数据（只能读回自己提交的）必须要求登录，`public_submit` 已废弃，不允许靠游客身份免登录隔离。
 - `OPTIONS` 一律 403；带 `Sec-Fetch-Site` 时必须是 `same-origin`（防止外部站点调用）。
 - 业务接口代理只转发管理员配置的上游，应用无法指定任意地址。

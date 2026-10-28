@@ -47,7 +47,7 @@ v2 相对 v1 方案的变化：
  MongoDB · Redis · 对象存储（线上 COS / 本地磁盘）· LLM 网关
  外部：login.example.com（登录、用户信息）、业务后端（CORS 直连）
 ```
-- 站点由路径区分：`/a/{appId}[--beta|--dev]/`。server 自己解析路径；SDK 请求头的 `X-App-Id` / `X-App-Channel` 只用于平台接口定位应用（可伪造，按已接受风险处理）。单域名意味着应用之间没有 origin 隔离，见 [security-boundary.md](security-boundary.md)。
+- 站点由路径区分：`/a/{appId}[--beta|--dev]/`。server 自己解析路径；SDK 请求头的 `X-App-Id` / `X-App-Channel` 只用于平台接口定位应用，且必须与请求来源页面（`Referer`）解析出的应用、渠道完全一致，否则 403；缺失渠道不再有默认值。单域名意味着应用之间没有 origin 隔离，见 [security-boundary.md](security-boundary.md)。
 - `admin`、`www`、`api`、`static` 等是保留 appId。appId 规则：`[a-z0-9-]{3,30}`，不能包含 `--`。
 - 所有环境都用 https。主站 cookie 很可能带 Secure 属性，本地也必须用 https：用 mkcert 给 `local.example.test` 签单域名证书。
 
@@ -140,7 +140,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 - 应用库：每个「应用 × 环境」一个库 `appdata_{appId}_{dev|prod}`，含系统集合 `_kv_user`、`_kv_app`、`_files`。系统字段由服务端写入。
 - ACL 预设：`private` / `public_read` / `submit_only` / `public_write` / `readonly` / `admin_only`（`public_submit` 已废弃，等同 `submit_only`：按用户隔离数据必须登录）；ajv 校验 schema（`additionalProperties:false`）；支持 `unique`、`limits`、`moderate`（公开文本过内容安全）。
 - 查询 DSL 白名单：`$eq $ne $gt $gte $lt $lte $in $nin $exists $and $or`，深度 ≤ 3；`limit` ≤ 100；`maxTimeMS` 2000。prod 环境的排序和 count 只能用声明了索引的字段。
-- 环境：预览和测试版用 dev 库，线上用 prod 库。发布时只做增量（新增集合、新增索引）；放宽 ACL 要在审批时确认。
+- 环境：预览和测试版用 dev 库，线上用 prod 库。渠道由页面来源决定，请求头必须与之一致；线上页面不可能读写 dev 库。发布时只做增量（新增集合、新增索引）；放宽 ACL 要在审批时确认。
 - 后台数据台：浏览、编辑、导出，`readonly` 种子数据可从 dev 同步到 prod。
 
 ## 8. 平台能力

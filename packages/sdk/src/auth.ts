@@ -1,5 +1,5 @@
 import { callNativeLogin } from './bridge'
-import { config } from './config'
+import { BOOT_MISSING_MESSAGE, config, isBootLoaded } from './config'
 import { container } from './env'
 import { PlatformError } from './errors'
 import { rawApi, setLoginHandler } from './http'
@@ -167,6 +167,11 @@ let readyPromise: Promise<void> | null = null
 export function initAuth(): Promise<void> {
   if (readyPromise)
     return readyPromise
+  if (!isBootLoaded) {
+    console.error(`[platform] ${BOOT_MISSING_MESSAGE}`)
+    readyPromise = Promise.resolve()
+    return readyPromise
+  }
   setLoginHandler(login)
   readyPromise = (async () => {
     try {

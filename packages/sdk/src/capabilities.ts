@@ -1,4 +1,4 @@
-import { config } from './config'
+import { BOOT_MISSING_MESSAGE, config, isBootLoaded } from './config'
 import { PlatformError } from './errors'
 import { withLogin } from './http'
 
@@ -15,6 +15,10 @@ interface BizOptions {
  */
 export const biz = {
   request<T = any>(path: string, options: BizOptions = {}): Promise<T> {
+    if (!isBootLoaded) {
+      console.error(`[platform] ${BOOT_MISSING_MESSAGE}`)
+      return Promise.reject(new PlatformError('INTERNAL_ERROR', BOOT_MISSING_MESSAGE))
+    }
     if (!path.startsWith('/'))
       return Promise.reject(new PlatformError('VALIDATION_FAILED', '业务接口路径需以 / 开头', 422))
     if (config.biz.prefixes.length && !config.biz.prefixes.some(p => path.startsWith(p)))

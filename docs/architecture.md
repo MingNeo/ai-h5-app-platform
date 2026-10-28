@@ -318,6 +318,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `agent_events` | SSE 事件（`sessionId + seq` 唯一） |
 | `audit_logs` | 审计 |
 | `api_clients` | 开放接口调用方（token 哈希、应用范围、权限、IP 白名单） |
+| `import_jobs` | 应用包导入的提交标记，崩溃恢复用；7 天 TTL 兜底 |
 | `telemetry_events` | 埋点，TTL 30 天 |
 
 应用数据：
@@ -417,6 +418,19 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 - 接口：应用列表、应用详情（含 manifest）、集合列表与条数、查询、分组统计、单条读写、CSV 导出、应用级 KV 读取。
 - 数据面：管理视角，不过滤 `_owner`；写入仍按 manifest schema 校验；每次调用写 `audit_logs`，actor 为 `client:{id}`；按 token 限流 600 次/分钟。
 - 管理：后台「开放接口」页（仅平台管理员）创建和吊销 token；机器可读文档在 `/open-api/v1/openapi.json`。
+
+### 应用包导入导出
+
+把一个应用完整搬到另一套部署实例。实现见 [core/app-package.ts](../apps/server/src/core/app-package.ts)（格式校验）和 [modules/admin/transfer.ts](../apps/server/src/modules/admin/transfer.ts)（路由与落库）。
+
+- 导出：`GET /admin-api/apps/:appId/export?data=collections,files,kv`，需要 `app.edit`；带任一数据类别时还需要 `data.export`。不传 `data` 只导出代码、配置、授权和 AI 会话历史；`includeData=1` 兼容旧链接，等同全选。返回 `{appId}.app.zip`。导出的源码是**当前草稿**，不是线上构建版本；构建/发布记录不随包迁移。
+- 导入：`POST /admin-api/apps/import`（multipart：`file` + 可选 `appId`），任意登录用户可用；留空 `appId` 时用包内的 `source.appId`。目标 appId 已存在（含软删除）直接拒绝，绝不覆盖。
+- 包结构：`app.json`（格式 `app-platform.app-package`，版本 2）、`files/**`（草稿源码与素材，二进制原样存储）、`history/sessions.ndjson`、`history/turns.ndjson`、`history/events.ndjson`（AI 会话历史，始终包含）、`data/<dev|prod>/<集合>.ndjson`、`data/<dev|prod>/_files.json`、`blobs/<sha256>`（运行数据，按选择包含）。
+- 运行数据分三类，可分别勾选：访问者提交的集合文档、访问者上传的文件（应用页面通过 `platform.files.upload` 写入 `_files` 的文件，原始字节；不是开发时放进 `public/` 的素材，后者属于源码始终导出）、KV（`_kv_app` + `_kv_user`）。默认都不导出。导出界面会说明每类的用途。不导出成员、构建/发布记录、快照、遥测、审计、授权审批备注。
+- 导入后应用处于「开发中」：只写草稿与快照，不构建、不发布；导入者成为唯一 owner，成员需重新添加。能力/业务接口授权只在目标目录中存在对应 key 时导入，平台管理员导入记为已批准，其他人记为待审批。
+- 会话历史导入时会重新分配会话/轮次 id 并重写事件引用，避免同实例重复导入撞主键；源轮次里的快照指针不迁移，历史改动不能撤销。轮次消息、事件（对话还原）、token 用量与状态都会保留。
+- 原子性：草稿、数据、成员、快照、授权全部先写到目标 appId 名下，`apps` 文档最后插入，作为唯一提交点；没有 `apps` 文档时应用列表、权限、host、gateway 都看不到该应用。失败按 appId 清理并删除本次新建的 `appdata_*` 集合（blobs 共享，不回滚）。写入前记 `import_jobs` 标记，服务启动时 `recoverImports()` 清理崩溃残留；导入用 appId 锁 + `apps` 主键唯一防并发。
+- 体积限制：ZIP ≤ 200MB、解压后 ≤ 300MB、单草稿文件 ≤ 2MB、单集合 ≤ 50,000 条、单上传文件 ≤ `UPLOAD_MAX_BYTES`；超过直接报错，不静默截断。
 
 ## 14. 测试与验证
 

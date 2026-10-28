@@ -17,6 +17,7 @@ import { registerFileRoutes } from './modules/admin/files'
 import { registerGrantRoutes } from './modules/admin/grants'
 import { registerMonitorRoutes } from './modules/admin/monitor'
 import { registerReleaseRoutes } from './modules/admin/release'
+import { registerTransferRoutes } from './modules/admin/transfer'
 import { registerUserRoutes } from './modules/admin/users'
 import { registerAgentRoutes } from './modules/agent/routes'
 import { registerGateway } from './modules/gateway'
@@ -50,6 +51,7 @@ export async function buildApp() {
 
   registerAdminAuth(app)
   registerAppRoutes(app)
+  registerTransferRoutes(app)
   registerFileRoutes(app)
   registerAgentRoutes(app)
   registerReleaseRoutes(app)
@@ -82,7 +84,7 @@ export async function buildApp() {
       if (site.path === '/' && !req.url.split('?')[0]!.endsWith('/'))
         return reply.redirect(`${req.url.split('?')[0]}/`)
       if (site.channel === 'dev') {
-        if (!readPreviewClaims(req.headers.cookie, site.appId))
+        if (!readPreviewClaims(req.headers.cookie, site.appId, site.channel))
           return reply.status(403).type('text/html; charset=utf-8').send(placeholderPage('preview_forbidden'))
         return serveAppDraft(req, reply)
       }

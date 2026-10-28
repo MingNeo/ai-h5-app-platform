@@ -1,4 +1,4 @@
-import { config, isPreview } from './config'
+import { BOOT_MISSING_MESSAGE, config, isBootLoaded, isPreview } from './config'
 import { onRequest } from './http'
 
 interface TelemetryEvent {
@@ -15,6 +15,11 @@ function flush() {
   timer = 0
   if (!queue.length)
     return
+  // 配置缺失时不发埋点：请求会带错误的 appId/渠道
+  if (!isBootLoaded) {
+    queue.length = 0
+    return
+  }
   const body = JSON.stringify({ events: queue.splice(0, 50) })
   // sendBeacon 不能带自定义头，appId / 渠道放进查询参数
   const url = `${config.apiBase}/telemetry?app=${encodeURIComponent(config.appId)}&channel=${encodeURIComponent(config.channel)}`
@@ -65,6 +70,8 @@ function toAdmin(entry: Record<string, unknown>) {
 }
 
 function devReport(entry: Record<string, unknown>) {
+  if (!isBootLoaded)
+    return
   devQueue.push(entry)
   if (!devTimer) {
     devTimer = window.setTimeout(() => {
@@ -81,6 +88,10 @@ function devReport(entry: Record<string, unknown>) {
 }
 
 export function initTelemetry() {
+  if (!isBootLoaded) {
+    console.error(`[platform] ${BOOT_MISSING_MESSAGE}`)
+    return
+  }
   const pv = () => report('pv', { referrer: document.referrer })
   pv()
   for (const m of ['pushState', 'replaceState'] as const) {

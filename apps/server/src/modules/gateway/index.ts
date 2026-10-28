@@ -1,7 +1,7 @@
 import { readFileSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { type Channel, dataEnvOf, RESERVED_APP_IDS, APP_ID_RE, appPath } from '@app-platform/shared'
+import { type Channel, dataEnvOf, parseAppPath, RESERVED_APP_IDS, APP_ID_RE, appPath } from '@app-platform/shared'
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify'
 import { config } from '../../config'
 import { allowedBizPrefixes, approvedGrants, effectiveManifest, getApp } from '../../core/apps'
@@ -84,13 +84,41 @@ const CHANNELS = new Set(['prod', 'beta', 'dev'])
 /**
  * 应用身份来自 SDK 请求头（或支持不带头的查询参数：sendBeacon、图片）。
  * 平台已放弃应用间的 origin 隔离，appId 可被应用代码修改，按已接受的风险处理。
+ *
+ * 渠道必须显式给出，缺省不再回退到 prod/dev；缺失或非法直接拒绝，
+ * 避免任何一侧的默认值不一致时静默落到错误的数据环境。
  */
-function appLocator(req: FastifyRequest): { appId: string, channel: Channel } | null {
+function appLocator(req: FastifyRequest): { appId: string, channel: Channel } {
   const appId = String(req.headers['x-app-id'] ?? queryOf(req, 'app') ?? '')
-  const rawChannel = String(req.headers['x-app-channel'] ?? queryOf(req, 'channel') ?? 'prod')
-  if (!APP_ID_RE.test(appId) || RESERVED_APP_IDS.has(appId) || !CHANNELS.has(rawChannel))
-    return null
+  const rawChannel = String(req.headers['x-app-channel'] ?? queryOf(req, 'channel') ?? '')
+  if (!APP_ID_RE.test(appId) || RESERVED_APP_IDS.has(appId))
+    throw err.notFound()
+  if (!CHANNELS.has(rawChannel))
+    throw err.invalid('缺少或非法的应用渠道标识')
   return { appId, channel: rawChannel as Channel }
+}
+
+/**
+ * 请求来源页面（Referer）解析出的应用与渠道。
+ * 这是渠道的权威来源：SDK 头/查询参数只用于交叉校验，两者不一致一律拒绝。
+ */
+function refererSite(req: FastifyRequest): { appId: string, channel: Channel } | null {
+  const raw = req.headers.referer
+  if (!raw)
+    return null
+  let url: URL
+  try {
+    url = new URL(raw)
+  }
+  catch {
+    return null
+  }
+  const hostname = url.hostname.toLowerCase()
+  const base = config.baseDomain.toLowerCase()
+  if (hostname !== base && !config.devHosts.includes(hostname))
+    return null
+  const site = parseAppPath(url.pathname)
+  return site ? { appId: site.appId, channel: site.channel } : null
 }
 
 async function identity(req: FastifyRequest) {
@@ -118,6 +146,22 @@ function cookieDomain() {
 }
 
 export function registerGateway(app: FastifyInstance) {
+  /**
+   * 平台接口的响应内容取决于请求头里的应用与渠道，URL 本身几乎不带这些信息。
+   * 一旦中间层（CDN / 反向代理）只按 URL 缓存，dev 的响应就可能被 prod 页面读到。
+   * 因此：除平台共享运行时文件和内容寻址的文件下载外，一律禁止缓存，并显式声明 Vary。
+   */
+  app.addHook('onSend', async (req, reply, payload) => {
+    if (!req.url.startsWith('/__platform/') && !req.url.startsWith('/open-api/'))
+      return payload
+    const path = req.url.split('?')[0]!
+    if (PLATFORM_ASSETS.has(path) || path.startsWith('/__platform/api/files/'))
+      return payload
+    reply.header('cache-control', 'no-store')
+    reply.header('vary', 'X-App-Id, X-App-Channel, Referer')
+    return payload
+  })
+
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/__platform/'))
       return
@@ -141,12 +185,26 @@ export function registerGateway(app: FastifyInstance) {
     if (path === '/__platform/preview-auth')
       return
     const loc = appLocator(req)
-    if (!loc)
-      throw err.notFound()
+    // 渠道以页面来源为准：来源页面必须是同一个应用、同一个渠道。
+    // 这样即使应用代码伪造了 X-App-Channel（或浏览器里残留了其它渠道的预览 cookie），
+    // 也不可能从线上页面读写测试环境的数据。
+    const src = refererSite(req)
+    if (!src || src.appId !== loc.appId || src.channel !== loc.channel) {
+      // 这类拒绝是排查“请求串到另一个环境”的关键线索，必须留痕
+      req.log.warn({
+        url: req.url,
+        referer: req.headers.referer,
+        claimedAppId: loc.appId,
+        claimedChannel: loc.channel,
+        sourceAppId: src?.appId,
+        sourceChannel: src?.channel,
+      }, 'app channel does not match request origin')
+      throw err.forbidden('请求来源与应用渠道不一致')
+    }
     const doc = await getApp(loc.appId)
     if (!doc)
       throw err.notFound('应用不存在')
-    if (loc.channel !== 'prod' && !readPreviewClaims(req.headers.cookie, loc.appId))
+    if (loc.channel !== 'prod' && !readPreviewClaims(req.headers.cookie, loc.appId, loc.channel))
       throw err.forbidden('需要预览权限')
     req.appCtx = { appId: loc.appId, channel: loc.channel }
   })
@@ -192,7 +250,7 @@ export function registerGateway(app: FastifyInstance) {
       return reply.status(403).type('text/html; charset=utf-8').send('<p>预览链接已过期，请回到后台重新打开</p>')
     if (!await getApp(claims.appId))
       return reply.status(403).type('text/html; charset=utf-8').send('<p>应用不存在或已删除</p>')
-    reply.setCookie(previewCookieName(claims.appId), previewCookieValue(claims.appId, claims.uid, claims.identity), {
+    reply.setCookie(previewCookieName(claims.appId, claims.channel), previewCookieValue(claims.appId, claims.channel, claims.uid, claims.identity), {
       path: '/',
       httpOnly: true,
       secure: true,

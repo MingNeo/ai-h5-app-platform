@@ -4,6 +4,7 @@ import { config } from './config'
 import { closeMongo, connectMongo } from './lib/mongo'
 import { initStore, store } from './lib/store'
 import { recoverTurns } from './modules/agent/runner'
+import { recoverImports } from './modules/admin/transfer'
 import { syncPlatformAdmins } from './modules/admin/auth'
 import { startBuildWorker } from './modules/build/service'
 
@@ -18,8 +19,12 @@ async function main() {
 
   if (config.roles.has('build'))
     await startBuildWorker()
-  if (config.roles.has('api'))
+  if (config.roles.has('api')) {
     await recoverTurns()
+    await recoverImports()
+    // 只清理超过 30 分钟的导入标记，避免误删其他副本正在进行的导入
+    setInterval(() => void recoverImports().catch(e => console.error('[transfer] 清理导入残留失败', e)), 10 * 60_000).unref()
+  }
 
   const shutdown = async (signal: string) => {
     app.log.info(`收到 ${signal}，正在关闭`)

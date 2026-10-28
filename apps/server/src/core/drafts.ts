@@ -21,6 +21,7 @@ export const draftEvents = new EventEmitter().setMaxListeners(0)
 
 const MAX_FILES = 500
 const MAX_FILE_BYTES = 2 * 1024 * 1024
+export { MAX_FILE_BYTES, MAX_FILES }
 const PATH_RE = /^(?![./])(?!.*\/\.\.?\/)(?!.*\/\/)[\w\-./@ \u4E00-\u9FA5]{1,200}$/
 
 export function validatePath(path: string, opts: { allowLocked?: boolean } = {}) {

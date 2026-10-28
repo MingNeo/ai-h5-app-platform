@@ -90,7 +90,7 @@ async function mainSiteUser(cookieHeader: string | undefined, ua: string | undef
 
 export async function resolveIdentity(req: { headers: Record<string, any> }, appId: string, channel: Channel): Promise<Identity> {
   if (channel !== 'prod') {
-    const claims = readPreviewClaims(req.headers.cookie, appId)
+    const claims = readPreviewClaims(req.headers.cookie, appId, channel)
     if (claims?.identity === 'guest')
       return { user: null, locked: true }
     if (claims?.identity === 'test')

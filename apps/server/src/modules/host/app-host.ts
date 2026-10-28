@@ -23,13 +23,16 @@ function platformHead(appId: string, channel: 'prod' | 'beta' | 'dev') {
   ]
 }
 
-function injectPlatformHead(html: string, appId: string, channel: 'prod' | 'beta' | 'dev') {
+/** 应用自己写的 boot.js 引用：渠道参数必须以服务端解析结果为准，不能用应用写死的值 */
+const BOOT_SRC_ATTR = /(src\s*=\s*)(["'])[^"']*\/__platform\/boot\.js[^"']*\2/gi
+const HAS_BOOT_SRC = /<script\b[^>]*\bsrc\s*=\s*["'][^"']*\/__platform\/boot\.js/i
+
+export function injectPlatformHead(html: string, appId: string, channel: 'prod' | 'beta' | 'dev') {
   const qs = `?app=${encodeURIComponent(appId)}&amp;channel=${encodeURIComponent(channel)}`
-  if (html.includes('/__platform/boot.js')) {
-    // 应用自己引用了 boot.js：补上 appId / channel，避免拿到空配置
-    return html.includes('/__platform/boot.js?')
-      ? html
-      : html.replace('/__platform/boot.js', `${BOOT_SCRIPT}${qs}`)
+  if (HAS_BOOT_SRC.test(html)) {
+    // 应用自己引用了 boot.js：无条件重写 app / channel（原有查询参数丢弃），
+    // 避免页面把测试配置带到线上或反之
+    return html.replace(BOOT_SRC_ATTR, (_m, pre: string, q: string) => `${pre}${q}${BOOT_SCRIPT}${qs}${q}`)
   }
   const tags = platformHead(appId, channel).join('\n    ')
   return html.replace(/<head[^>]*>/i, m => `${m}\n    ${tags}`)
@@ -170,7 +173,7 @@ export async function serveAppBuild(req: FastifyRequest, reply: FastifyReply) {
   const doc = await getApp(appId)
   if (!doc)
     return sendPage(reply, 404, placeholderPage('not_found'))
-  if (channel !== 'prod' && !readPreviewClaims(req.headers.cookie, appId))
+  if (channel !== 'prod' && !readPreviewClaims(req.headers.cookie, appId, channel))
     return sendPage(reply, 403, placeholderPage('preview_forbidden'))
   if (channel === 'prod') {
     if (doc.status === 'offline')

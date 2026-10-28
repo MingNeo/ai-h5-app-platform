@@ -29,6 +29,8 @@ export interface AppDoc {
   createdAt: Date
   updatedAt: Date
   deletedAt?: Date
+  /** 应用包导入时写入的标记；提交完成后清除，仅用于崩溃恢复判断 */
+  importToken?: string
 }
 
 /**
@@ -244,6 +246,16 @@ export interface TelemetryDoc {
   data: Record<string, unknown>
 }
 
+/**
+ * 应用包导入的提交标记。导入期间存在；apps 文档插入后删除。
+ * 进程崩溃后启动时按它清理未提交的残留（见 modules/admin/transfer.ts）。
+ */
+export interface ImportJobDoc {
+  _id: string
+  appId: string
+  createdAt: Date
+}
+
 let client: MongoClient
 let db: Db
 let memoryServer: { stop: () => Promise<unknown> } | null = null
@@ -297,6 +309,7 @@ export const col = {
   get apiClients() { return db.collection<ApiClientDoc>('api_clients') },
   get telemetry() { return db.collection<TelemetryDoc>('telemetry_events') },
   get adminResumes() { return db.collection<AdminResumeDoc>('admin_resumes') },
+  get importJobs() { return db.collection<ImportJobDoc>('import_jobs') },
 }
 
 /** 应用数据：放在平台主库，按「应用 × 环境」加集合名前缀隔离（线上账号通常只授权主库，独立建库会 Unauthorized） */
@@ -326,5 +339,6 @@ async function ensureIndexes() {
     col.telemetry.createIndex({ ts: 1 }, { expireAfterSeconds: 30 * 86400 }),
     col.telemetry.createIndex({ appId: 1, type: 1, ts: -1 }),
     col.adminResumes.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+    col.importJobs.createIndex({ createdAt: 1 }, { expireAfterSeconds: 7 * 86400 }),
   ])
 }

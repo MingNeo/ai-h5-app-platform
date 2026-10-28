@@ -2,6 +2,8 @@
 
 `platform` 是应用和平台之间唯一的通道：登录、数据、KV、上传、业务接口、埋点都在这里。平台会自动注入每个页面，不要自己引用 `/__platform/boot.js`。
 
+网关按「页面来源（Referer）」确定当前是线上还是测试环境，所以：不要手写 `X-App-Channel` / `X-App-Id` 请求头，不要设置 `<meta name="referrer" content="no-referrer">` 或 `fetch(..., { referrerPolicy: 'no-referrer' })`，也不要自己 fetch `/__platform/api/*`。直接用 `platform.*`，渠道由平台决定。
+
 ## 身份与登录
 
 - 页面默认对游客开放；manifest 的 `requireLogin: true` 才会在启动时强制登录
