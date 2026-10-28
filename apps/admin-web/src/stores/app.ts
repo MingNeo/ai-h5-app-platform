@@ -12,9 +12,11 @@ export interface AppDetail {
   schedule: { startAt?: string | null, endAt?: string | null } | null
   betaBuildId: string | null
   prodBuildId: string | null
+  createdAt: string
+  updatedAt: string
   role: AppRole
   perms: AppPerm[]
-  urls: { prod: string, beta: string, dev: string }
+  urls: { prod: string, beta?: string, dev?: string }
   manifest: any
   manifestErrors: string[]
   grants: Array<{ _id: string, type: string, key: string, status: string, reason: string, reviewNote?: string, createdAt: string }>

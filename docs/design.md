@@ -224,7 +224,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 3. 回滚：切换到历史 release。下线和定时上下线在后台配置。飞书机器人推送通知。
 
 ## 11. 后台
-- 飞书 OAuth 登录（限本企业）。角色：平台管理员；应用级 `owner` / `developer` / `publisher` / `data` / `operator` / `viewer`。角色只是权限包，接口按权限位判断（`app.edit`、`app.publish`、`app.manage`、`console.view`、`data.read`、`data.write.dev`、`data.write.prod`、`data.export`），可给单个成员覆盖。
+- 飞书 OAuth 登录（限本企业）。角色：平台管理员；应用级 `owner` / `developer` / `publisher` / `data` / `operator` / `viewer` / `observer`。角色只是权限包，接口按权限位判断（`app.view`、`app.edit`、`app.publish`、`app.manage`、`console.view`、`data.read`、`data.write.dev`、`data.write.prod`、`data.export`），可给单个成员覆盖。`observer` 只有 `app.view`：能看概览、线上链接和 beta 预览，不能看 dev 草稿或任何运营入口。
 - **数据台**：dev / prod 切换、集合与字段、分页查询、增删改、CSV 导出、readonly 同步、应用级 KV、按字段分组统计。
 - **后台视图**：应用里的 `admin.json` 描述运营要看什么（数字卡片、柱状/饼图/折线、可筛选可搜索可编辑的表格、说明），后台按配置渲染；AI 对话、后台「AI 生成」、手写 JSON 三种方式都能产出，规范见 `agent-docs/admin-view.md`。
 - **开放接口**：内网系统用 Bearer token 调 `/open-api/v1/*`，读数据、统计、导出；token 在后台「开放接口」页管理，按应用和 scope 授权，调用留审计。

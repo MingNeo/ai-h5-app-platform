@@ -14,7 +14,7 @@ export function registerReleaseRoutes(app: FastifyInstance) {
   // ---------- 预览 ----------
   app.post('/admin-api/apps/:appId/preview-url', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { user } = await requirePerm(req, appId, 'console.view')
+    const { user, perms } = await requirePerm(req, appId, 'app.view')
     const body = parseBody(z.object({
       channel: z.enum(['dev', 'beta', 'prod']).default('dev'),
       identity: z.enum(['self', 'guest', 'test']).default('self'),
@@ -22,6 +22,9 @@ export function registerReleaseRoutes(app: FastifyInstance) {
       /** 保留兼容；普通和二维码预览票据统一有效 30 分钟 */
       qr: z.boolean().default(false),
     }), req.body)
+    // 观察者只能看已构建的测试版，开发版草稿仍要求后台视图权限。
+    if (body.channel === 'dev' && !perms.has('console.view'))
+      throw err.forbidden('需要「查看后台视图与监控」权限才能预览开发版')
     const origin = `https://${config.baseDomain}`
     if (body.channel === 'prod')
       return ok({ url: `${appUrl(appId, 'prod', config.baseDomain)}${body.path.replace(/^\/+/, '')}` })

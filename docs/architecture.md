@@ -107,7 +107,7 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 
 ### 实时预览
 
-1. 后台调用 `POST /admin-api/apps/:appId/preview-url` 签发 30 分钟有效的短期票据（普通链接与二维码一致），票据里带 appId 和渠道。
+1. 后台调用 `POST /admin-api/apps/:appId/preview-url` 签发 30 分钟有效的短期票据（普通链接与二维码一致），票据里带 appId 和渠道。签发需要 `app.view`；`dev` 渠道还要求 `console.view`，观察者只能签 `beta` 和公开的 `prod` 链接。
 2. 浏览器访问 `/__platform/preview-auth?t=...&next=...`，服务端校验票据后写入 `__Host-app_preview__{appId}` cookie（24h，HttpOnly、Secure、SameSite=Lax），再 302 到 `/a/{appId}--dev/{next}`。
 3. `dev` / `beta` 渠道的页面请求和平台接口都要求该 cookie；没有则返回「需要预览权限」占位页。
 4. 预览直接返回草稿文件（`serveAppDraft()`），没有 dev server、没有 HMR；刷新页面即可看到最新代码。
@@ -124,8 +124,8 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 - 刷新免跳飞书：登录时额外发一枚恢复 cookie（`Path=/admin-api/auth/`，`HttpOnly`+`Secure`+`SameSite=Strict`，值的哈希存 Mongo `admin_resumes`，TTL 自动过期，跨进程重启存活）。刷新后整页跳 `GET /admin-api/auth/resume`，服务端校验是浏览器顶层导航（`Sec-Fetch-Mode: navigate`）后换新票据走回 `exchange` 流程；校验失败才回退到飞书登录。细节见 [security-boundary.md](security-boundary.md)。
 - `/admin-api/*` 只认 `Authorization: Bearer`（登录相关路由除外），没有 cookie 回退；非 GET 仍校验 `Origin`；OPTIONS 直接 403；不开放 CORS。
 - `/admin` 文档返回 `Cross-Origin-Opener-Policy: same-origin`、`X-Frame-Options: DENY`、`frame-ancestors 'none'`，阻止应用页面通过 popup / iframe 拿到 token。细节见 [security-boundary.md](security-boundary.md)。
-- 角色：平台管理员、应用 `owner` / `developer` / `publisher` / `data` / `operator` / `viewer`。平台管理员对所有应用等价于 owner。
-- 鉴权按权限位（`APP_PERMS`，[permissions.ts](../packages/shared/src/permissions.ts)）判断，角色只是预置权限包：`owner` 全量、`developer` 开发与测试数据、`publisher` 发布回滚、`data` 数据读写导出、`operator` 只看后台视图与监控、`viewer` 还可读任意集合。成员文档的 `perms` 可覆盖角色包。
+- 角色：平台管理员、应用 `owner` / `developer` / `publisher` / `data` / `operator` / `viewer` / `observer`。平台管理员对所有应用等价于 owner。
+- 鉴权按权限位（`APP_PERMS`，[permissions.ts](../packages/shared/src/permissions.ts)）判断，角色只是预置权限包：`owner` 全量、`developer` 开发与测试数据、`publisher` 发布回滚、`data` 数据读写导出、`operator` 只看后台视图与监控、`viewer` 还可读任意集合、`observer` 只看应用概览和线上/测试版入口（`app.view`，不能看开发版，也不能进后台视图、监控、数据台）。成员文档的 `perms` 可覆盖角色包。
 - 读数据时，只有 `console.view` 的人只能读 `admin.json` 引用的集合，`data.read` 才能读任意已声明集合。
 - 新登录的人默认零权限：不是平台管理员也没加入任何应用成员时，应用列表是空的，看不到任何应用或数据，要靠平台管理员在「用户管理」/「成员」页手动授权。唯一的自动授权例外是 `PLATFORM_ADMINS` 留空时的「首位登录者」兜底，见上方 `PLATFORM_ADMINS` 一行。
 - 入口域名的裸根路径（没有 `/admin`、`/a/{appId}` 等前缀）返回空白页，不会自动跳转到 `/admin/`，避免把后台入口暴露给普通访问者。

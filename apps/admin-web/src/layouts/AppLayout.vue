@@ -12,6 +12,7 @@ const router = useRouter()
 interface Tab { path: string, label: string, need?: AppPerm[], any?: AppPerm[] }
 
 const tabs: Tab[] = [
+  { path: 'overview', label: '概览', need: ['app.view'] },
   { path: 'develop', label: '开发', need: ['app.edit'] },
   { path: 'release', label: '发布', any: ['app.publish', 'app.edit'] },
   { path: 'data', label: '数据', need: ['data.read'] },

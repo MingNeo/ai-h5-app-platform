@@ -25,6 +25,7 @@ export const router = createRouter({
       props: true,
       children: [
         { path: '', redirect: to => `/apps/${to.params.appId}/develop` },
+        { path: 'overview', component: () => import('./pages/app/Overview.vue') },
         { path: 'develop', component: () => import('./pages/app/Develop.vue') },
         { path: 'release', component: () => import('./pages/app/Release.vue') },
         { path: 'data', component: () => import('./pages/app/Data.vue') },

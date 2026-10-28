@@ -36,6 +36,9 @@ export function appUrls(appId: string) {
 }
 
 function view(app: AppDoc, role: string | null, perms: AppPerm[] = []) {
+  const urls = appUrls(app._id)
+  // 开发渠道入口只对能看后台视图的人展示；观察者只能拿线上和测试版。
+  const full = perms.includes('console.view')
   return {
     appId: app._id,
     name: app.name,
@@ -49,7 +52,7 @@ function view(app: AppDoc, role: string | null, perms: AppPerm[] = []) {
     updatedAt: app.updatedAt,
     role,
     perms,
-    urls: appUrls(app._id),
+    urls: full ? urls : { prod: urls.prod, beta: urls.beta },
   }
 }
 
@@ -132,10 +135,14 @@ export function registerAppRoutes(app: FastifyInstance) {
 
   app.get('/admin-api/apps/:appId', async (req) => {
     const { appId } = req.params as { appId: string }
-    const { app: doc, role, perms } = await requirePerm(req, appId, 'console.view')
+    const { app: doc, role, perms } = await requirePerm(req, appId, 'app.view')
+    const base = view(doc, role, [...perms])
+    // 只有 app.view 的人只拿概览字段；草稿 manifest 与能力授权属于运营/开发信息。
+    if (!perms.has('console.view'))
+      return ok({ ...base, manifest: null, manifestErrors: [], grants: [] })
     const manifest = await draftManifest(appId)
     const grants = await col.grants.find({ appId }).sort({ createdAt: -1 }).toArray()
-    return ok({ ...view(doc, role, [...perms]), manifest: manifest.manifest, manifestErrors: manifest.errors, grants })
+    return ok({ ...base, manifest: manifest.manifest, manifestErrors: manifest.errors, grants })
   })
 
   app.patch('/admin-api/apps/:appId', async (req) => {

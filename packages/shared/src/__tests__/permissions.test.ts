@@ -20,6 +20,18 @@ describe('应用权限', () => {
     expect(permsOf('developer').has('data.write.prod')).toBe(false)
   })
 
+  it('观察者只能查看应用概览', () => {
+    expect(new Set(permsOf('observer'))).toEqual(new Set(['app.view']))
+    expect(permsOf('observer').has('console.view')).toBe(false)
+    expect(permsOf('observer').has('data.read')).toBe(false)
+    expect(permsOf('observer').has('app.edit')).toBe(false)
+  })
+
+  it('现有角色都能查看应用概览', () => {
+    for (const role of ['viewer', 'operator', 'developer', 'publisher', 'data', 'owner'] as const)
+      expect(permsOf(role).has('app.view')).toBe(true)
+  })
+
   it('显式 perms 覆盖角色包，并过滤非法值', () => {
     const p = permsOf('viewer', ['app.publish', 'nope' as never])
     expect([...p]).toEqual(['app.publish'])
@@ -31,8 +43,10 @@ describe('应用权限', () => {
   })
 
   it('角色与权限校验', () => {
+    expect(isAppRole('observer')).toBe(true)
     expect(isAppRole('publisher')).toBe(true)
     expect(isAppRole('admin')).toBe(false)
+    expect(isAppPerm('app.view')).toBe(true)
     expect(isAppPerm('data.write.prod')).toBe(true)
     expect(isAppPerm('data.write')).toBe(false)
   })

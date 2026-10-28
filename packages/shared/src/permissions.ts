@@ -3,6 +3,7 @@
  * 需求里「能开发」「能发布」「能看后台视图」「能管数据」是正交的，不能用角色等级比较表示。
  */
 export const APP_PERMS = [
+  'app.view',
   'console.view',
   'data.read',
   'data.write.dev',
@@ -15,11 +16,12 @@ export const APP_PERMS = [
 
 export type AppPerm = typeof APP_PERMS[number]
 
-export const APP_ROLES = ['viewer', 'operator', 'developer', 'publisher', 'data', 'owner'] as const
+export const APP_ROLES = ['observer', 'viewer', 'operator', 'developer', 'publisher', 'data', 'owner'] as const
 
 export type AppRole = typeof APP_ROLES[number]
 
 export const ROLE_LABELS: Record<AppRole, string> = {
+  observer: '观察者',
   viewer: '只读',
   operator: '运营（只看后台视图）',
   developer: '开发者',
@@ -30,11 +32,12 @@ export const ROLE_LABELS: Record<AppRole, string> = {
 
 /** 每个角色的权限包；新增角色在这里加一行即可，不用改鉴权代码 */
 export const ROLE_PERMS: Record<AppRole, AppPerm[]> = {
-  viewer: ['console.view', 'data.read'],
-  operator: ['console.view'],
-  developer: ['console.view', 'data.read', 'data.write.dev', 'app.edit'],
-  publisher: ['console.view', 'data.read', 'app.publish'],
-  data: ['console.view', 'data.read', 'data.write.dev', 'data.write.prod', 'data.export'],
+  observer: ['app.view'],
+  viewer: ['app.view', 'console.view', 'data.read'],
+  operator: ['app.view', 'console.view'],
+  developer: ['app.view', 'console.view', 'data.read', 'data.write.dev', 'app.edit'],
+  publisher: ['app.view', 'console.view', 'data.read', 'app.publish'],
+  data: ['app.view', 'console.view', 'data.read', 'data.write.dev', 'data.write.prod', 'data.export'],
   owner: [...APP_PERMS],
 }
 
@@ -53,6 +56,7 @@ export function permsOf(role: AppRole, override?: readonly string[] | null): Set
 }
 
 export const PERM_LABELS: Record<AppPerm, string> = {
+  'app.view': '查看应用概览',
   'console.view': '查看后台视图与监控',
   'data.read': '读取数据',
   'data.write.dev': '写测试环境数据',
