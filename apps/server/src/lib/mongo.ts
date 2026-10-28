@@ -22,6 +22,8 @@ export interface AppDoc {
   icon: string
   status: 'active' | 'offline' | 'deleted'
   schedule?: { startAt?: Date | null, endAt?: Date | null }
+  /** 打开后任何登录后台的平台用户都能以观察者身份查看概览与测试版/线上预览 */
+  observeOpen?: boolean
   betaBuildId?: string
   prodBuildId?: string
   prodReleaseId?: string

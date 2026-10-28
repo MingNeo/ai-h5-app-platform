@@ -1,13 +1,21 @@
 <script setup lang="ts">
 import { ROLE_LABELS, type AppRole } from '@app-platform/shared'
-import { computed } from 'vue'
+import { ElMessage } from 'element-plus'
+import { computed, ref } from 'vue'
 import { api } from '../../api'
+import PreviewPanel from '../../components/preview/PreviewPanel.vue'
 import { useAppStore } from '../../stores/app'
 
 const store = useAppStore()
 const app = computed(() => store.app!)
 const roleLabel = computed(() => ROLE_LABELS[app.value.role as AppRole] ?? app.value.role)
 const online = computed(() => Boolean(app.value.prodBuildId) && app.value.status !== 'offline')
+const canManage = computed(() => store.can('app.manage'))
+const hasPreview = computed(() => Boolean(app.value.betaBuildId || app.value.prodBuildId))
+const observeOpen = ref(Boolean(app.value.observeOpen))
+const savingObserve = ref(false)
+/** 预览分享链接：登录后台的人打开后即使不是成员，也能看到概览和内嵌预览 */
+const observeUrl = computed(() => `${location.origin}${import.meta.env.BASE_URL}apps/${app.value.appId}/overview`)
 
 function statusTag() {
   if (app.value.status === 'offline')
@@ -25,6 +33,26 @@ async function openBeta() {
     body: { channel: 'beta', path: '/' },
   })
   window.open(res.url, '_blank')
+}
+
+async function setObserve(open: boolean) {
+  savingObserve.value = true
+  try {
+    await api(`/apps/${app.value.appId}/observe`, { method: 'PUT', body: { open } })
+    app.value.observeOpen = open
+    ElMessage.success(open ? '已允许其他人预览' : '已关闭预览')
+  }
+  catch {
+    observeOpen.value = !open
+  }
+  finally {
+    savingObserve.value = false
+  }
+}
+
+async function copyObserveUrl() {
+  await navigator.clipboard.writeText(observeUrl.value)
+  ElMessage.success('预览链接已复制')
 }
 </script>
 
@@ -78,6 +106,30 @@ async function openBeta() {
         </el-button>
         <span v-else class="text-13px text-[var(--muted)]">测试版尚未生成</span>
       </div>
+    </div>
+
+    <div class="bg-white rounded-xl border border-[var(--border)] mt-4 overflow-hidden">
+      <div class="flex items-center gap-3 px-4 h-48px border-b border-[var(--border)]">
+        <span class="font-600">预览</span>
+        <el-tag v-if="app.observeOpen" size="small" type="success">
+          已开放
+        </el-tag>
+        <span class="flex-1" />
+        <template v-if="canManage">
+          <span class="text-13px text-[var(--muted)]">允许其他登录用户预览</span>
+          <el-switch v-model="observeOpen" :loading="savingObserve" @change="setObserve(observeOpen)" />
+          <el-button v-if="observeOpen" size="small" @click="copyObserveUrl">
+            复制预览链接
+          </el-button>
+        </template>
+        <span v-else class="text-12px text-[var(--muted)]">
+          {{ app.observeOpen ? '负责人已开放预览' : '未开放预览' }}
+        </span>
+      </div>
+      <div v-if="hasPreview" class="h-[68vh] min-h-520px">
+        <PreviewPanel :app-id="app.appId" mode="observe" />
+      </div>
+      <el-empty v-else description="还没有可预览的测试版或线上版" :image-size="80" />
     </div>
   </div>
 </template>

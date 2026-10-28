@@ -84,6 +84,11 @@ async function create() {
   }
 }
 
+function openApp(a: AppItem) {
+  // 观察者没有开发页权限，直接进概览看内嵌预览
+  void router.push(`/apps/${a.appId}/${a.role === 'observer' ? 'overview' : 'develop'}`)
+}
+
 function openExport(a: AppItem) {
   exportTarget.value = a
   dataFlags.collections = false
@@ -198,7 +203,7 @@ onMounted(async () => {
       <div
         v-for="a in filtered" :key="a.appId"
         class="bg-white rounded-xl p-4 border border-[var(--border)] cursor-pointer hover:shadow-md transition-shadow"
-        @click="router.push(`/apps/${a.appId}/develop`)"
+        @click="openApp(a)"
       >
         <div class="flex items-center gap-2">
           <div class="w-36px h-36px rounded-lg bg-gradient-to-br from-orange-400 to-red-500 text-white flex items-center justify-center font-600">

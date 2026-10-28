@@ -132,7 +132,9 @@ class RedisStore implements Store {
   }
 
   async incr(key: string, ttlSec: number, by = 1) {
-    const res = await this.pub.multi().incrby(key, by).expire(key, ttlSec, 'NX').exec()
+    // 不用 EXPIRE ... NX：该选项要 Redis 7+，6.x 会语法错误并让整个事务 EXECABORT。
+    // key 都带窗口/日期后缀，每次 INCR 重置 TTL 只把过期时间推后一个窗口。
+    const res = await this.pub.multi().incrby(key, by).expire(key, ttlSec).exec()
     return Number(res?.[0]?.[1] ?? 0)
   }
 

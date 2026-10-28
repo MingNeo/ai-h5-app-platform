@@ -108,9 +108,16 @@ export async function appAccess(user: AdminUserDoc, appId: string): Promise<{ ro
   if (user.isPlatformAdmin)
     return { role: 'owner', perms: new Set<AppPerm>(APP_PERMS) }
   const m = await col.members.findOne({ appId, userId: user._id })
-  if (!m)
-    return null
-  return { role: m.role, perms: permsOf(m.role, m.perms) }
+  if (m)
+    return { role: m.role, perms: permsOf(m.role, m.perms) }
+  // 应用打开了「允许观察」：任何登录后台的人都能以观察者身份查看，不再需要单独加成员
+  const open = await col.apps.findOne(
+    { _id: appId, observeOpen: true, status: { $ne: 'deleted' } },
+    { projection: { _id: 1 } },
+  )
+  if (open)
+    return { role: 'observer', perms: permsOf('observer') }
+  return null
 }
 
 function denied(perm: AppPerm) {

@@ -10,6 +10,7 @@ export interface AppDetail {
   icon: string
   status: 'active' | 'offline'
   schedule: { startAt?: string | null, endAt?: string | null } | null
+  observeOpen: boolean
   betaBuildId: string | null
   prodBuildId: string | null
   createdAt: string

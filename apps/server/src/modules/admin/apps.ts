@@ -46,6 +46,7 @@ function view(app: AppDoc, role: string | null, perms: AppPerm[] = []) {
     icon: app.icon,
     status: app.status,
     schedule: app.schedule ?? null,
+    observeOpen: Boolean(app.observeOpen),
     betaBuildId: app.betaBuildId ?? null,
     prodBuildId: app.prodBuildId ?? null,
     createdAt: app.createdAt,
@@ -106,11 +107,15 @@ export function registerAppRoutes(app: FastifyInstance) {
       const members = await col.members.find({ userId: user._id }).toArray()
       for (const m of members)
         access.set(m.appId, { role: m.role, perms: [...permsOf(m.role, m.perms)] })
-      apps = await col.apps.find({ _id: { $in: [...access.keys()] }, status: { $ne: 'deleted' } }).sort({ updatedAt: -1 }).toArray()
+      // 「允许观察」的应用也出现在列表里，观察者点进去只能看到概览
+      apps = await col.apps.find({
+        $or: [{ _id: { $in: [...access.keys()] } }, { observeOpen: true }],
+        status: { $ne: 'deleted' },
+      }).sort({ updatedAt: -1 }).toArray()
     }
     return ok(apps.map((a) => {
       const acc = access.get(a._id)
-      return view(a, acc?.role ?? null, acc?.perms ?? [])
+      return view(a, acc?.role ?? 'observer', acc?.perms ?? [...ROLE_PERMS.observer])
     }))
   })
 
@@ -184,6 +189,17 @@ export function registerAppRoutes(app: FastifyInstance) {
     await writeDraft(appId, MANIFEST_FILE, `${JSON.stringify(manifest, null, 2)}\n`, { userId: user._id })
     audit(user._id, 'app.requireLogin', appId, { requireLogin })
     return ok({ requireLogin })
+  })
+
+  // 「允许其他人观察」：打开后任何登录后台的人都能看到概览和内嵌预览，无需加成员
+  app.put('/admin-api/apps/:appId/observe', async (req) => {
+    const { appId } = req.params as { appId: string }
+    const { user } = await requirePerm(req, appId, 'app.manage')
+    const { open } = parseBody(z.object({ open: z.boolean() }), req.body)
+    await col.apps.updateOne({ _id: appId }, { $set: { observeOpen: open, updatedAt: new Date() } })
+    invalidateApp(appId)
+    audit(user._id, 'app.observe', appId, { open })
+    return ok({ observeOpen: open })
   })
 
   // 数据集合的访问权限（acl）同样来自 manifest.json，这里做便捷开关（改草稿文件，随发布生效）

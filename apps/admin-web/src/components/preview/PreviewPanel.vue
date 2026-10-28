@@ -5,8 +5,10 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { api } from '../../api'
 import { useAppStore } from '../../stores/app'
 
-const props = defineProps<{ appId: string }>()
+const props = defineProps<{ appId: string, mode?: 'develop' | 'observe' }>()
 const store = useAppStore()
+/** 观察模式只看测试版/线上版，不暴露草稿、身份切换和控制台 */
+const observeMode = computed(() => props.mode === 'observe')
 
 type Channel = 'dev' | 'beta' | 'prod'
 interface LogEntry { ts: number, level: 'log' | 'info' | 'warn' | 'error', kind: string, message: string, source: 'page' | 'server' }
@@ -19,7 +21,9 @@ const DEVICES = [
   { key: 'ipad', label: 'iPad (768×1024)', w: 768, h: 1024 },
 ]
 
-const channel = ref<Channel>('dev')
+const channel = ref<Channel>(observeMode.value ? (store.app?.betaBuildId ? 'beta' : 'prod') : 'dev')
+/** 观察模式不自动加载：切 tab 回来不会反复签票据、拉预览 */
+const started = ref(!observeMode.value)
 const identity = ref<'self' | 'guest' | 'test'>('self')
 const deviceKey = ref('iphone-14')
 const landscape = ref(false)
@@ -57,7 +61,7 @@ const host = computed(() => {
   }
 })
 const channelAvailable = computed(() => ({
-  dev: true,
+  dev: !observeMode.value,
   beta: Boolean(store.app?.betaBuildId),
   prod: Boolean(store.app?.prodBuildId),
 }))
@@ -82,6 +86,11 @@ async function load(path = '/') {
 
 function refresh() {
   void load(currentPath.value)
+}
+
+async function start() {
+  started.value = true
+  await load()
 }
 
 function openNew() {
@@ -121,7 +130,7 @@ function onMessage(e: MessageEvent) {
 }
 
 async function pollServerErrors() {
-  if (channel.value !== 'dev' || document.hidden)
+  if (observeMode.value || channel.value !== 'dev' || document.hidden)
     return
   try {
     const errs = await api<Array<{ ts: number, kind: string, message: string }>>(`/apps/${props.appId}/dev-errors`, { query: { since: lastServerErrorTs }, quiet: true })
@@ -154,14 +163,20 @@ function clearLogs() {
 watch([channel, identity], () => {
   logs.value = []
   requests.value = []
-  void load(currentPath.value)
+  if (started.value)
+    void load(currentPath.value)
 })
-watch(() => store.previewVersion, () => refresh())
+watch(() => store.previewVersion, () => {
+  if (started.value)
+    refresh()
+})
 
 onMounted(() => {
   window.addEventListener('message', onMessage)
-  void load()
-  pollTimer = window.setInterval(pollServerErrors, 3000)
+  if (!observeMode.value) {
+    void load()
+    pollTimer = window.setInterval(pollServerErrors, 3000)
+  }
   resizeObs = new ResizeObserver(([entry]) => {
     boxSize.value = { w: entry!.contentRect.width, h: entry!.contentRect.height }
   })
@@ -177,13 +192,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="h-full flex flex-col">
-    <div class="flex items-center gap-1.5 px-3 py-2 border-b border-[var(--border)] bg-white flex-wrap">
+    <div v-if="!observeMode || started" class="flex items-center gap-1.5 px-3 py-2 border-b border-[var(--border)] bg-white flex-wrap">
       <el-select v-model="channel" size="small" class="!w-110px">
-        <el-option label="草稿（实时）" value="dev" />
+        <el-option v-if="!observeMode" label="草稿（实时）" value="dev" />
         <el-option label="测试版" value="beta" :disabled="!channelAvailable.beta" />
         <el-option label="线上版" value="prod" :disabled="!channelAvailable.prod" />
       </el-select>
-      <el-select v-model="identity" size="small" class="!w-110px" :disabled="channel === 'prod'">
+      <el-select v-if="!observeMode" v-model="identity" size="small" class="!w-110px" :disabled="channel === 'prod'">
         <el-option label="我的账号" value="self" />
         <el-option label="游客" value="guest" />
         <el-option label="测试身份" value="test" />
@@ -218,7 +233,15 @@ onBeforeUnmount(() => {
       </el-popover>
     </div>
 
-    <div ref="box" class="flex-1 min-h-0 flex items-center justify-center bg-[#eef0f3] overflow-hidden">
+    <div ref="box" class="relative flex-1 min-h-0 flex items-center justify-center bg-[#eef0f3] overflow-hidden">
+      <div v-if="observeMode && !started" class="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-[#eef0f3]">
+        <div class="text-13px text-[var(--muted)]">
+          预览不会自动加载
+        </div>
+        <el-button type="primary" @click="start">
+          加载预览
+        </el-button>
+      </div>
       <div
         class="bg-black rounded-[28px] p-[10px] shadow-xl shrink-0"
         :style="{ width: `${frameW + 20}px`, height: `${frameH + 20}px`, transform: `scale(${scale})`, transformOrigin: 'center' }"
@@ -231,7 +254,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div class="border-t border-[var(--border)] bg-white" :class="showConsole ? 'h-200px' : ''">
+    <div v-if="!observeMode" class="border-t border-[var(--border)] bg-white" :class="showConsole ? 'h-200px' : ''">
       <div class="flex items-center gap-2 px-3 py-1.5 text-13px border-b border-[var(--border)]">
         <el-button size="small" text @click="showConsole = !showConsole">
           {{ showConsole ? '▾' : '▸' }} 控制台
