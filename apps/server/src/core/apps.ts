@@ -11,6 +11,8 @@ interface Cached<T> {
 const TTL = 5000
 const appCache = new Map<string, Cached<AppDoc | null>>()
 const manifestCache = new Map<string, { manifest: AppManifest | null, errors: string[] }>()
+/** build 不可变，buildId 唯一；按 buildId 缓存避免每次请求都查 builds 集合 */
+const buildManifestCache = new Map<string, AppManifest | null>()
 const grantCache = new Map<string, Cached<{ capabilities: Set<string>, bizPrefixes: string[] }>>()
 
 let subscribed = false
@@ -66,8 +68,15 @@ export async function effectiveManifest(appId: string, channel: Channel): Promis
   const buildId = channel === 'prod' ? app?.prodBuildId : app?.betaBuildId
   if (!buildId)
     return null
+  if (buildManifestCache.has(buildId))
+    return buildManifestCache.get(buildId)!
   const build = await col.builds.findOne({ _id: buildId }, { projection: { manifest: 1 } })
-  return build?.manifest ?? null
+  const manifest = build?.manifest ?? null
+  // 容量上限与其它进程内缓存保持一致；淘汰顺序是 FIFO，buildId 不复用，不会串版本
+  if (buildManifestCache.size > 200)
+    buildManifestCache.delete(buildManifestCache.keys().next().value!)
+  buildManifestCache.set(buildId, manifest)
+  return manifest
 }
 
 export async function approvedGrants(appId: string) {

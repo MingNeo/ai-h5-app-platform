@@ -208,7 +208,12 @@ export function registerGateway(app: FastifyInstance) {
   // 平台 SDK + 应用配置
   app.get('/__platform/boot.js', async (req, reply) => {
     const { appId, channel } = req.appCtx!
-    const [doc, manifest, grants, id] = await Promise.all([getApp(appId), effectiveManifest(appId, channel), approvedGrants(appId), identity(req)])
+    // 预览身份锁定只取决于本地签名票据，同步读 cookie 即可。
+    // 真实用户身份要请求主站用户信息接口（含 3s 超时），不能放在 boot 阶段：
+    // boot.js 是 head 里的同步脚本，会阻塞首屏。身份由 SDK 启动后异步请求 /api/auth/me 获取。
+    const claims = channel === 'prod' ? null : readPreviewClaims(req.headers.cookie, appId, channel)
+    const identityLocked = claims?.identity === 'guest' || claims?.identity === 'test'
+    const [doc, manifest, grants] = await Promise.all([getApp(appId), effectiveManifest(appId, channel), approvedGrants(appId)])
     const buildId = channel === 'prod' ? doc?.prodBuildId : channel === 'beta' ? doc?.betaBuildId : 'draft'
     const cfg = {
       appId,
@@ -229,7 +234,7 @@ export function registerGateway(app: FastifyInstance) {
       },
       native: { containers: config.native.containers },
       adminOrigin: channel === 'prod' ? undefined : config.adminOrigin,
-      identityLocked: id.locked,
+      identityLocked,
     }
     if (!req.headers.cookie?.includes('app_vid='))
       reply.setCookie('app_vid', randomToken(12), { path: '/', maxAge: 365 * 86400, sameSite: 'lax', secure: true })

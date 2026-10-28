@@ -64,14 +64,23 @@ export async function appPageHeaders(appId: string, channel: 'prod' | 'beta' | '
 }
 
 const REWRITE_TEXT = /\.(?:html?|js|mjs|css|svg)$/i
+/**
+ * 构建文件集在 buildId 生命周期内不变，路径集合按文件集对象缓存，避免每次文件请求都重扫一遍。
+ * 用 WeakMap：草稿每次是新建的 Map，不会命中也不会泄漏；构建 Map 被淘汰后由 GC 自动回收。
+ */
+const urlPathsCache = new WeakMap<Map<string, SnapshotFile>, Set<string>>()
 /** 应用内文件在根路径下的可访问路径集合，用于只改写真实存在的引用 */
 function appUrlPaths(files: Map<string, SnapshotFile>) {
+  const hit = urlPathsCache.get(files)
+  if (hit)
+    return hit
   const out = new Set<string>()
   for (const p of files.keys()) {
     out.add(`/${p}`)
     if (p.startsWith('public/'))
       out.add(`/${p.slice('public/'.length)}`)
   }
+  urlPathsCache.set(files, out)
   return out
 }
 

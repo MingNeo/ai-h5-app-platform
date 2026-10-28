@@ -48,6 +48,10 @@ export function mapMainSiteUser(body: any): AppUser | null {
   }
 }
 
+/** 主站接口失败时的负缓存标记：TTL 比正常结果短，避免故障期间每个请求都等满 3s 超时 */
+const FETCH_FAILURE_MARKER = '!fetch-error'
+const FETCH_FAILURE_TTL_SECONDS = 5
+
 async function mainSiteUser(cookieHeader: string | undefined, ua: string | undefined): Promise<AppUser | null> {
   const cookies = mainSiteCookieHeader(cookieHeader)
   if (!cookies)
@@ -57,7 +61,7 @@ async function mainSiteUser(cookieHeader: string | undefined, ua: string | undef
   const key = `auth:main-site:${sha256(parsed.sess ?? cookies)}`
   const cached = await store.get(key)
   if (cached)
-    return cached === 'null' ? null : JSON.parse(cached)
+    return cached === 'null' || cached === FETCH_FAILURE_MARKER ? null : JSON.parse(cached)
   let user: AppUser | null = null
   try {
     const res = await fetch(`${config.auth.userInfoUrl}${config.auth.userInfoUrl.includes('?') ? '&' : '?'}t=${Date.now()}`, {
@@ -68,6 +72,8 @@ async function mainSiteUser(cookieHeader: string | undefined, ua: string | undef
   }
   catch (e) {
     console.warn('[auth] 查询主站用户信息失败', (e as Error).message)
+    // 失败也要写缓存：主站抖动时否则每个请求都阻塞到超时
+    await store.set(key, FETCH_FAILURE_MARKER, FETCH_FAILURE_TTL_SECONDS).catch(() => {})
     return null
   }
   await store.set(key, JSON.stringify(user), config.auth.cacheSeconds)

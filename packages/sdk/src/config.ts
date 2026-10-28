@@ -73,7 +73,7 @@ export const config: BootConfig = Object.freeze(boot ? cloneBoot(boot) : {
   mockLogin: false,
   apiBase: '/__platform/api',
   biz: { prefixes: [], unauthCodes: [401] },
-  login: { loginOrigin: '', loginMobileOrigin: '', fromActivity: '' },
+  login: { loginOrigin: 'https://zhiyou.smzdm.com', loginMobileOrigin: 'https://zhiyou.smzdm.com', fromActivity: '' },
   native: { containers: [] },
 }) as BootConfig
 

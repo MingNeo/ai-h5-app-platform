@@ -11,7 +11,8 @@ declare global {
   }
 }
 
-const loginBase = () => config.login.loginOrigin
+const LOGIN_ORIGIN_FALLBACK = 'https://zhiyou.smzdm.com'
+const loginBase = () => config.login.loginOrigin || LOGIN_ORIGIN_FALLBACK
 
 async function loginPost(path: string, params: Record<string, string>) {
   const res = await fetch(`${loginBase()}${path}`, {
@@ -124,11 +125,24 @@ export function showLoginModal(): Promise<void> {
     if (agreementLinks.length === 1)
       agreementLinks.push('用户协议与隐私政策')
 
-    const fallbackBase = config.login.loginMobileOrigin || config.login.loginOrigin
+    const fallbackBase = config.login.loginMobileOrigin || config.login.loginOrigin || LOGIN_ORIGIN_FALLBACK
+    const fallbackUrl = `${fallbackBase}/user/login?redirect_to=${encodeURIComponent(location.href)}`
     const fallback = h('a', {
       class: 'fallback',
-      href: `${fallbackBase}/user/login?redirect_to=${encodeURIComponent(location.href)}`,
+      href: fallbackUrl,
+      target: '_top',
+      rel: 'noopener',
       text: '无法登录？使用登录页',
+    })
+    fallback.addEventListener('click', (e) => {
+      // 后台预览在 iframe 里：普通跳转只会刷新 iframe，必须导航顶层窗口
+      try {
+        if (window.top && window.top !== window) {
+          e.preventDefault()
+          window.top.location.href = fallbackUrl
+        }
+      }
+      catch {}
     })
 
     const devLogin = h('button', { class: 'link dev', type: 'button', text: '使用模拟账号登录（调试）' }) as HTMLButtonElement
