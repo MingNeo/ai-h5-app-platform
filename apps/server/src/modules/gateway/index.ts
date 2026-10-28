@@ -14,10 +14,10 @@ import { ok, parseCookies } from '../../lib/http'
 import { UPLOAD_MIME } from '../../lib/mime'
 import { appCollection, col } from '../../lib/mongo'
 import { rateLimit } from '../../lib/store'
-import { newId, randomToken } from '../../lib/tokens'
+import { newId, randomToken, signToken } from '../../lib/tokens'
 import { registerPlatformAssets } from '../host/platform-assets'
 import { countDocs, createDoc, type DataCtx, getDoc, groupDocs, queryDocs, removeDoc, updateDoc } from './data'
-import { encodeMock, type Identity, MOCK_COOKIE, resolveIdentity } from './identity'
+import { DEV_USER_COOKIE, type Identity, resolveIdentity } from './identity'
 
 const require = createRequire(import.meta.url)
 const SDK_JS = join(dirname(require.resolve('@app-platform/sdk/package.json')), 'dist/sdk.js')
@@ -57,7 +57,7 @@ const PLATFORM_ASSETS = new Set([
 
 /** 不转发给上游的平台 cookie（后台会话、预览票据、预览身份） */
 function isPlatformCookie(name: string) {
-  return name === '__Host-app_admin' || name.startsWith('__Host-app_preview') || name === MOCK_COOKIE
+  return name === '__Host-app_admin' || name.startsWith('__Host-app_preview') || name === DEV_USER_COOKIE
 }
 
 /** 转发主站 cookie（sess 等），平台自己的 cookie 全部剔除 */
@@ -141,10 +141,6 @@ async function dataCtx(req: FastifyRequest): Promise<DataCtx> {
   }
 }
 
-function cookieDomain() {
-  return `.${config.baseDomain}`
-}
-
 export function registerGateway(app: FastifyInstance) {
   /**
    * 平台接口的响应内容取决于请求头里的应用与渠道，URL 本身几乎不带这些信息。
@@ -221,7 +217,7 @@ export function registerGateway(app: FastifyInstance) {
       version: buildId ?? '0',
       sdkVersion: '1',
       requireLogin: Boolean(manifest?.requireLogin),
-      authProvider: config.auth.provider,
+      mockLogin: config.auth.allowMockLogin && channel !== 'prod',
       apiBase: '/__platform/api',
       biz: { prefixes: allowedBizPrefixes(manifest, grants.bizPrefixes), unauthCodes: config.biz.unauthCodes },
       login: {
@@ -266,20 +262,29 @@ export function registerGateway(app: FastifyInstance) {
     return ok({ user: id.user, identityLocked: id.locked })
   })
 
-  // 本地 mock 登录：模拟主站在 .<baseDomain> 写入共享 cookie
+  // 调试用的模拟登录：ALLOW_MOCK_LOGIN=1 才开启，dev/beta 渠道可用，prod 永远拒绝。
+  // 线上开发/测试环境需要调试数据时可以显式打开；正式环境不要设置。
+  // cookie 里带 appId + channel 签名，跨渠道不识别。
   app.post('/__platform/api/dev/mock-login', async (req, reply) => {
-    if (config.auth.provider !== 'mock')
+    const { appId, channel } = req.appCtx!
+    if (!config.auth.allowMockLogin || channel === 'prod')
       throw err.forbidden('当前环境未开启模拟登录')
-    const mobile = String((req.body as { mobile?: string })?.mobile ?? '')
-    if (!/^1\d{10}$/.test(mobile))
-      throw err.invalid('手机号格式不正确')
-    const user = { uid: `mock_${mobile.slice(-4)}`, nickname: `用户${mobile.slice(-4)}`, avatar: '' }
-    reply.setCookie(MOCK_COOKIE, encodeMock(user), { domain: cookieDomain(), path: '/', secure: true, sameSite: 'lax', maxAge: 30 * 86400 })
+    const claims = readPreviewClaims(req.headers.cookie, appId, channel)
+    if (!claims)
+      throw err.forbidden('需要该渠道的预览权限')
+    const user = { uid: `dev_${claims.uid}`, nickname: '开发测试用户', avatar: '' }
+    reply.setCookie(DEV_USER_COOKIE, signToken({ kind: 'dev-user', appId, channel, user }, 7 * 86400), {
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: 7 * 86400,
+    })
     return ok({ user })
   })
 
   app.post('/__platform/api/dev/mock-logout', async (_req, reply) => {
-    reply.clearCookie(MOCK_COOKIE, { domain: cookieDomain(), path: '/' })
+    reply.clearCookie(DEV_USER_COOKIE, { path: '/' })
     return ok({})
   })
 

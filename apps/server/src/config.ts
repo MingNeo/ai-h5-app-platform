@@ -86,11 +86,12 @@ function parseContainers(raw: string | undefined): NativeContainer[] {
 
 const nativeContainers = parseContainers(env.APP_CONTAINERS)
 
-// 默认走线上行为（复用主站登录）；本地开发在 .env.local 里显式设为 mock 才会模拟登录
-const authProvider = (env.AUTH_PROVIDER || 'main-site') as 'mock' | 'main-site'
-const authUserInfoUrl = env.AUTH_USERINFO_URL || ''
-if (authProvider === 'main-site' && !authUserInfoUrl)
-  throw new Error('AUTH_PROVIDER=main-site 时必须配置 AUTH_USERINFO_URL（主站用户信息接口）；本地开发请在 .env.local 设置 AUTH_PROVIDER=mock')
+// 只复用主站真实登录：平台不签发自己的会话，也不提供模拟登录。
+// 主站地址内置，环境变量仅用于覆盖（例如测试环境指向别的登录服务）。
+const MAIN_SITE_LOGIN_ORIGIN = 'https://zhiyou.smzdm.com'
+const MAIN_SITE_USERINFO_URL = `${MAIN_SITE_LOGIN_ORIGIN}/user/info/jsonp_get_current`
+const authUserInfoUrl = env.AUTH_USERINFO_URL || MAIN_SITE_USERINFO_URL
+const loginOrigin = env.LOGIN_ORIGIN || MAIN_SITE_LOGIN_ORIGIN
 
 export const config = {
   repoRoot: REPO_ROOT,
@@ -113,13 +114,14 @@ export const config = {
   })(),
 
   auth: {
-    provider: authProvider,
     userInfoUrl: authUserInfoUrl,
+    /** 显式开启才允许模拟登录（dev/beta 渠道）；线上正式环境不要设置 ALLOW_MOCK_LOGIN */
+    allowMockLogin: bool(env.ALLOW_MOCK_LOGIN),
     cacheSeconds: num(env.AUTH_CACHE_SECONDS, 60),
     /** 用户信息接口里表示用户 ID 的字段，按顺序取第一个非空值 */
-    uidFields: list(env.AUTH_UID_FIELDS || 'uid,user_id'),
-    loginOrigin: env.LOGIN_ORIGIN || '',
-    loginMobileOrigin: env.LOGIN_MOBILE_ORIGIN || '',
+    uidFields: list(env.AUTH_UID_FIELDS || 'smzdm_id,uid,user_id'),
+    loginOrigin,
+    loginMobileOrigin: env.LOGIN_MOBILE_ORIGIN || loginOrigin,
     fromActivity: env.LOGIN_FROM_ACTIVITY || '',
     agreementUrl: env.LOGIN_AGREEMENT_URL || '',
     privacyUrl: env.LOGIN_PRIVACY_URL || '',

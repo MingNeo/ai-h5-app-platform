@@ -1,10 +1,11 @@
-// 应用端用户身份：线上走主站 cookie（.example.test 自动带到平台接口），本地开发可用 mock。
+// 应用端用户身份：只认主站 cookie（.smzdm.com 自动带到平台接口），平台不签发会话。
 import type { Channel } from '@app-platform/shared'
 import { config } from '../../config'
 import { readPreviewClaims, testUserFor } from '../../core/preview-access'
 import { sha256 } from '../../lib/blob'
 import { parseCookies } from '../../lib/http'
 import { store } from '../../lib/store'
+import { verifyToken } from '../../lib/tokens'
 
 export interface AppUser {
   uid: string
@@ -18,29 +19,14 @@ export interface Identity {
   locked: boolean
 }
 
-export const MOCK_COOKIE = 'app_mock_user'
-
-function decodeMock(raw: string | undefined): AppUser | null {
-  if (!raw)
-    return null
-  try {
-    const u = JSON.parse(Buffer.from(raw, 'base64url').toString())
-    if (typeof u.uid === 'string' && u.uid)
-      return { uid: u.uid, nickname: String(u.nickname ?? ''), avatar: String(u.avatar ?? '') }
-  }
-  catch {}
-  return null
-}
-
-export function encodeMock(u: AppUser) {
-  return Buffer.from(JSON.stringify(u)).toString('base64url')
-}
+/** 开发版模拟身份 cookie：只对 dev 渠道生效，线上/测试渠道一律忽略 */
+export const DEV_USER_COOKIE = 'app_dev_user'
 
 /** 只把主站 cookie 转发给用户信息接口，去掉平台自己的 cookie */
 function mainSiteCookieHeader(header: string | undefined) {
   if (!header)
     return ''
-  return header.split(';').map(s => s.trim()).filter(s => s && !s.startsWith('__Host-') && !s.startsWith(`${MOCK_COOKIE}=`)).join('; ')
+  return header.split(';').map(s => s.trim()).filter(s => s && !s.startsWith('__Host-') && !s.startsWith('app_vid=')).join('; ')
 }
 
 function parseJsonp(text: string) {
@@ -96,8 +82,11 @@ export async function resolveIdentity(req: { headers: Record<string, any> }, app
     if (claims?.identity === 'test')
       return { user: testUserFor(claims.uid), locked: true }
   }
-  if (config.auth.provider === 'mock')
-    return { user: decodeMock(parseCookies(req.headers.cookie)[MOCK_COOKIE]), locked: false }
+  if (config.auth.allowMockLogin && channel !== 'prod') {
+    const claims = verifyToken<{ kind: string, appId: string, channel: string, user: AppUser }>(parseCookies(req.headers.cookie)[DEV_USER_COOKIE])
+    if (claims?.kind === 'dev-user' && claims.appId === appId && claims.channel === channel && claims.user?.uid)
+      return { user: claims.user, locked: false }
+  }
   if (!config.auth.userInfoUrl)
     return { user: null, locked: false }
   return { user: await mainSiteUser(req.headers.cookie, req.headers['user-agent']), locked: false }

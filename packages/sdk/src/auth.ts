@@ -132,12 +132,17 @@ export function login(): Promise<User> {
 }
 
 export async function logout() {
-  if (config.authProvider === 'mock') {
-    await rawApi('/dev/mock-logout', { method: 'POST', body: {} })
-    setUser(null)
-    return
-  }
   if (container === 'browser') {
+    if (config.mockLogin) {
+      try {
+        await rawApi('/dev/mock-logout', { method: 'POST', body: {} })
+      }
+      catch {}
+      if (user?.uid.startsWith('dev_')) {
+        setUser(null)
+        return
+      }
+    }
     if (config.login.loginOrigin)
       location.href = `${config.login.loginOrigin}/user/logout?redirect_to=${encodeURIComponent(location.href)}`
     else

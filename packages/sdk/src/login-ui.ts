@@ -20,7 +20,7 @@ async function loginPost(path: string, params: Record<string, string>) {
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(params).toString(),
   })
-  return res.json() as Promise<{ error_code: number, error_msg?: string, data?: any }>
+  return res.json() as Promise<{ error_code: number, error_msg?: string, captcha_type?: string, data?: any }>
 }
 
 async function loadGeetest(): Promise<void> {
@@ -30,7 +30,7 @@ async function loadGeetest(): Promise<void> {
   await import('./geetest-loader.js')
 }
 
-function geetestVerify(): Promise<Record<string, string>> {
+function geetestVerify(slot: HTMLElement): Promise<Record<string, string>> {
   return new Promise((resolve, reject) => {
     fetch(`${loginBase()}/user/getgeetest/captcha_init_v3?scene=login&rand=${Math.random().toString(36).slice(2)}`, { credentials: 'include' })
       .then(r => r.json())
@@ -45,10 +45,17 @@ function geetestVerify(): Promise<Record<string, string>> {
           product: 'bind',
         }, (captcha) => {
           captcha
+            .appendTo(slot)
             .onReady(() => captcha.verify())
             .onSuccess(() => {
               const result = captcha.getValidate()
-              result ? resolve(result) : reject(new Error('验证失败'))
+              if (result) {
+                captcha.destroy?.()
+                resolve(result)
+              }
+              else {
+                reject(new Error('验证失败'))
+              }
             })
             .onError(() => reject(new Error('验证组件加载失败')))
             .onClose?.(() => reject(new Error('已取消验证')))
@@ -91,7 +98,6 @@ const PHONE_RE = /^1[3-9]\d{9}$/
 export function showLoginModal(): Promise<void> {
   return new Promise((resolve, reject) => {
     const { host, root } = mount()
-    const isMock = config.authProvider === 'mock'
     const close = (ok: boolean) => {
       host.remove()
       ok ? resolve() : reject(new PlatformError('LOGIN_CANCELLED', '已取消登录', 499))
@@ -108,6 +114,7 @@ export function showLoginModal(): Promise<void> {
     const captchaInput = h('input', { maxlength: '4', placeholder: '图形验证码' }) as HTMLInputElement
     const captchaImg = h('img', { alt: '图形验证码' }) as HTMLImageElement
     captchaRow.append(captchaInput, captchaImg)
+    const geetestSlot = h('div', { class: 'geetest hidden' })
 
     const agreementLinks: Array<Node | string> = ['我已阅读并同意']
     if (config.login.agreementUrl)
@@ -117,23 +124,27 @@ export function showLoginModal(): Promise<void> {
     if (agreementLinks.length === 1)
       agreementLinks.push('用户协议与隐私政策')
 
+    const fallbackBase = config.login.loginMobileOrigin || config.login.loginOrigin
     const fallback = h('a', {
       class: 'fallback',
-      href: `${config.login.loginMobileOrigin}/user/login/quick/?redirect_to=${encodeURIComponent(location.href)}`,
+      href: `${fallbackBase}/user/login?redirect_to=${encodeURIComponent(location.href)}`,
       text: '无法登录？使用登录页',
     })
+
+    const devLogin = h('button', { class: 'link dev', type: 'button', text: '使用模拟账号登录（调试）' }) as HTMLButtonElement
 
     const panel = h('div', { class: 'panel', role: 'dialog', 'aria-modal': 'true' }, [
       closeBtn,
       h('div', { class: 'title', text: '登录后继续' }),
-      isMock ? h('div', { class: 'mock', text: '本地开发：模拟登录，验证码任意填写' }) : '',
       h('div', { class: 'row' }, [mobile]),
       captchaRow,
+      geetestSlot,
       h('div', { class: 'row' }, [code, sendBtn]),
       errorEl,
       submit,
       h('label', { class: 'agree' }, [agree, ...agreementLinks]),
-      isMock ? '' : fallback,
+      config.mockLogin ? devLogin : '',
+      fallback,
     ])
     root.append(h('div', { class: 'mask' }), panel)
     closeBtn.addEventListener('click', () => close(false))
@@ -162,10 +173,12 @@ export function showLoginModal(): Promise<void> {
       }, 1000)
     }
 
-    const requestSms = async (extra: Record<string, string>) => {
+    const requestSms = async (extra: Record<string, string>, allowCaptchaChallenge = false) => {
       const res = await loginPost('/user/login/ajax_get_mobile_code/', { mobile: mobile.value.trim(), ...extra })
-      // 110202：需要先完成人机验证（与 v1 一致，不视为错误）
-      if (res.error_code && res.error_code !== 110202)
+      // 110202：需要先完成人机验证（验证码类型在响应顶层的 captcha_type 里）
+      if (res.error_code === 110202 && allowCaptchaChallenge)
+        return res
+      if (res.error_code)
         throw new Error(res.error_msg || '验证码发送失败')
       return res
     }
@@ -175,11 +188,6 @@ export function showLoginModal(): Promise<void> {
       const m = mobile.value.trim()
       if (!PHONE_RE.test(m))
         return setError('请输入正确的手机号')
-      if (isMock) {
-        toast(root, '验证码已发送（模拟）')
-        startCountdown()
-        return
-      }
       sendBtn.disabled = true
       try {
         if (!captchaRow.classList.contains('hidden')) {
@@ -190,11 +198,14 @@ export function showLoginModal(): Promise<void> {
           startCountdown()
           return
         }
-        const first = await requestSms({})
-        const type = first.data?.captcha_type
+        const first = await requestSms({}, true)
+        const type = first.captcha_type ?? first.data?.captcha_type
         if (type === 'geetest') {
-          const validate = await geetestVerify()
+          geetestSlot.classList.remove('hidden')
+          const validate = await geetestVerify(geetestSlot)
           await requestSms(validate)
+          geetestSlot.classList.add('hidden')
+          geetestSlot.replaceChildren()
         }
         else if (type === 'text') {
           captchaRow.classList.remove('hidden')
@@ -204,12 +215,31 @@ export function showLoginModal(): Promise<void> {
           setError('请输入图形验证码后再次点击发送')
           return
         }
+        else if (first.error_code === 110202) {
+          throw new Error('需要完成人机验证，请刷新后重试')
+        }
         toast(root, '验证码已发送')
         startCountdown()
       }
       catch (e) {
+        geetestSlot.classList.add('hidden')
+        geetestSlot.replaceChildren()
         sendBtn.disabled = false
         setError(e instanceof TypeError ? '网络异常，可使用下方登录页登录' : (e as Error).message)
+      }
+    })
+
+    devLogin.addEventListener('click', async () => {
+      setError('')
+      devLogin.disabled = true
+      try {
+        await rawApi('/dev/mock-login', { method: 'POST', body: {} })
+        clearInterval(countdownTimer)
+        close(true)
+      }
+      catch (e) {
+        devLogin.disabled = false
+        setError((e as Error).message || '模拟登录失败')
       }
     })
 
@@ -225,18 +255,13 @@ export function showLoginModal(): Promise<void> {
       submit.disabled = true
       submit.textContent = '登录中…'
       try {
-        if (isMock) {
-          await rawApi('/dev/mock-login', { method: 'POST', body: { mobile: m } })
-        }
-        else {
-          const res = await loginPost('/user/login/ajax_quick_check', {
-            mobile: m,
-            mobile_code: code.value.trim(),
-            from_activity: config.login.fromActivity,
-          })
-          if (res.error_code)
-            throw new Error(res.error_msg || '登录失败')
-        }
+        const res = await loginPost('/user/login/ajax_quick_check', {
+          mobile: m,
+          mobile_code: code.value.trim(),
+          from_activity: config.login.fromActivity,
+        })
+        if (res.error_code)
+          throw new Error(res.error_msg || '登录失败')
         clearInterval(countdownTimer)
         close(true)
       }

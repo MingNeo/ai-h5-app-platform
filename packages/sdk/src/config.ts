@@ -17,7 +17,8 @@ export interface BootConfig {
   version: string
   sdkVersion: string
   requireLogin: boolean
-  authProvider: 'main-site' | 'mock'
+  /** 服务端开启 ALLOW_MOCK_LOGIN 时（dev/beta）为 true：登录弹窗提供模拟账号入口，prod 永不注入 */
+  mockLogin?: boolean
   apiBase: string
   biz: {
     /** 已授权的业务接口前缀（仅用于提前报错，真正的校验在平台网关） */
@@ -69,7 +70,7 @@ export const config: BootConfig = Object.freeze(boot ? cloneBoot(boot) : {
   version: '0',
   sdkVersion: '1',
   requireLogin: false,
-  authProvider: 'mock',
+  mockLogin: false,
   apiBase: '/__platform/api',
   biz: { prefixes: [], unauthCodes: [401] },
   login: { loginOrigin: '', loginMobileOrigin: '', fromActivity: '' },

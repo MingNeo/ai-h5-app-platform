@@ -19,7 +19,7 @@
 | Redis | 可选，多副本必填 | 锁、限流、计数、pub/sub；单副本可不配 |
 | 飞书应用 | 企业自建应用 | 后台登录；需要用户信息读取权限 |
 | LLM 网关 | OpenAI 兼容 Chat Completions | 不配置时使用脚本化 mock 模型，只能走流程演示 |
-| 主站登录服务 | 用户信息接口 | 线上默认走此登录，必须配置；仅本地开发显式设 `AUTH_PROVIDER=mock` 才能跳过 |
+| 主站登录服务 | 用户信息接口 | 地址已内置，通常不用配；线上只走主站真实登录，模拟账号仅 dev 渠道可用 |
 
 MongoDB 用空库即可：平台启动时自动建平台库索引，应用库在构建/发布时按 manifest 建索引，不需要手工建表。服务器最低建议：2 核 4GB，Node 22.12+（镜像内已包含）。磁盘主要被 Mongo 的 `blobs` 占用。
 
@@ -63,18 +63,18 @@ https://apps.example.com/admin-api/auth/feishu/callback
 **应用端登录（复用主站账号）**
 
 ```bash
-AUTH_PROVIDER=main-site
-AUTH_USERINFO_URL=https://login.example.com/user/info
-AUTH_UID_FIELDS=uid,user_id             # 按顺序从响应里取用户 ID
-AUTH_CACHE_SECONDS=60
-LOGIN_ORIGIN=https://login.example.com
-LOGIN_MOBILE_ORIGIN=https://m.login.example.com
+# 以下为内置默认值，仅在需要指向其它登录服务时覆盖
+# AUTH_USERINFO_URL=https://zhiyou.smzdm.com/user/info/jsonp_get_current
+# AUTH_UID_FIELDS=smzdm_id,uid,user_id
+# AUTH_CACHE_SECONDS=60
+# LOGIN_ORIGIN=https://zhiyou.smzdm.com
+# LOGIN_MOBILE_ORIGIN=https://zhiyou.smzdm.com
 LOGIN_FROM_ACTIVITY=<主站分配的值>
 LOGIN_AGREEMENT_URL=
 LOGIN_PRIVACY_URL=
 ```
 
-`AUTH_PROVIDER=main-site` 时缺少 `AUTH_USERINFO_URL` 服务会启动失败。主站 cookie 必须能带到 `APP_BASE_DOMAIN`（同站或 Domain 覆盖）。
+主站 cookie 必须能带到 `APP_BASE_DOMAIN`（同站或 Domain 覆盖）。调试数据时可设 `ALLOW_MOCK_LOGIN=1`，dev/beta 渠道会出现模拟账号入口；prod 渠道永远不生效。
 
 **AI 与业务接口（按需）**
 
@@ -233,7 +233,6 @@ docker run -d ... app-platform-server:<new-tag>
 | 现象 | 排查 |
 |---|---|
 | 启动报「缺少环境变量 APP_BASE_DOMAIN」 | 环境变量没注入，或域名不是完整域名 |
-| 启动报 `AUTH_PROVIDER=main-site 时必须配置 AUTH_USERINFO_URL` | 补 `AUTH_USERINFO_URL`，或本地用 `AUTH_PROVIDER=mock` |
 | 访问根路径 404 / 「资源不存在」 | 请求 Host 不是 `APP_BASE_DOMAIN`；检查 DNS、代理的 `Host` 头 |
 | `/admin/` 打开空白或 404 | 镜像里没有 `apps/admin-web/dist`；重新构建镜像 |
 | 后台登录后刷新就掉登录、天天要重新飞书登录 | token 本身只存内存，刷新应该靠恢复 cookie（存 Mongo `admin_resumes`）免登，正常只跳一下 `/admin-api/auth/resume` 就回来；如果每次刷新都真的弹回飞书登录页，检查：`DEV_ADMIN_BYPASS` 是否误设为 1（会跳过自动恢复逻辑）、反向代理有没有转发 `Cookie` 头、`MONGO_URL` 是否可写 |

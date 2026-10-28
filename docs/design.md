@@ -246,7 +246,7 @@ platform.app / platform.env                    // appId、channel、inApp、os
 - `.env.local`：LLM 网关地址和 key、飞书应用配置（本地可开 `DEV_ADMIN_BYPASS=1` 跳过飞书登录）。
 - `make seed`：生成一个 demo 应用（投票页），用来验证全链路。
 - 部署镜像：`make image`（`deploy/Dockerfile`）。
-- 线上入口域名在 `.example.com` 下，并且走 https，浏览器会带上真实的主站 cookie（前提是 §4.4 的 CORS 已放开；未放开前用 `DEV_FAKE_USER` 注入模拟用户）。本地用 `AUTH_PROVIDER=mock`。
+- 线上入口域名在 `.example.com` 下，并且走 https，浏览器会带上真实的主站 cookie（前提是 §4.4 的 CORS 已放开）。应用端只复用主站真实登录，不提供模拟登录。
 
 ## 13. 安全汇总
 | 威胁 | 措施 |

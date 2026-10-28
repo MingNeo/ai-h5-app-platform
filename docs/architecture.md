@@ -134,9 +134,9 @@ scripts/             dev 编排、HTTPS 代理、冒烟测试
 
 `resolveIdentity()`（[identity.ts](../apps/server/src/modules/gateway/identity.ts)）：
 
-- `AUTH_PROVIDER=main-site`：把 `sess` 等主站 cookie 转发给 `AUTH_USERINFO_URL`，把结果按 `sha256(sess)` 缓存 `AUTH_CACHE_SECONDS`（默认 60s）；用户 uid 字段按 `AUTH_UID_FIELDS`（默认 `uid,user_id`）依次尝试取值。平台**不签发自己的会话**，主站登出后最多 60s 失效。
-- `AUTH_PROVIDER=mock`：读取 `app_mock_user` cookie，配合 `/__platform/api/dev/mock-login` 做本地调试。
+- 把 `sess` 等主站 cookie 转发给 `AUTH_USERINFO_URL`，把结果按 `sha256(sess)` 缓存 `AUTH_CACHE_SECONDS`（默认 60s）；用户 uid 字段按 `AUTH_UID_FIELDS`（默认 `smzdm_id,uid,user_id`）依次尝试取值。平台**不签发自己的会话**，主站登出后最多 60s 失效。平台不提供模拟登录。
 - 预览渠道优先使用票据里的锁定身份。
+- 调试用模拟登录由 `ALLOW_MOCK_LOGIN=1` 显式开启（任何环境都可开，适合线上开发/测试环境调试应用）；`/__platform/api/dev/mock-login` 只接受 `dev` / `beta` 渠道且要求该渠道的预览权限，写入带 `appId + channel` 签名的 `app_dev_user` cookie。`prod` 永远拒绝，`beta` / `dev` 的 cookie 也互不通用；正式环境不设置该变量，页面不会出现入口。
 
 SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 
@@ -171,7 +171,7 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `GET /__platform/tailwind.js` | Tailwind v4 浏览器运行时（扫描 DOM 生成原子类） |
 | `GET /__platform/preview-auth` | 预览票据换 cookie |
 | `GET /__platform/api/auth/me` | 当前用户 |
-| `POST /__platform/api/dev/mock-login` / `mock-logout` | 仅 mock 模式 |
+| `POST /__platform/api/dev/mock-login` / `mock-logout` | 仅 `ALLOW_MOCK_LOGIN=1` 且 dev/beta 渠道 |
 | `POST /db/:col/query`、`/count`、`/group` | 查询、计数、分组 |
 | `POST /db/:col`、`GET/PATCH/DELETE /db/:col/:id` | 增删改查 |
 | `GET/PUT/DELETE /kv/user/:key`、`GET /kv/app/:key` | 用户 KV、应用 KV |
@@ -341,12 +341,12 @@ SDK 登录（[packages/sdk/src/auth.ts](../packages/sdk/src/auth.ts)）：
 | `DATA_DIR` | `.data` | 临时目录、内置 mongod 数据 |
 | `SECRET` | 随机 | 后台会话和预览票据签名；不配置则重启失效 |
 | `ROLES` | `api,build` | 进程角色 |
-| `AUTH_PROVIDER` | `mock` | `mock` / `main-site` |
-| `AUTH_USERINFO_URL` | 空 | 主站登录服务用户信息接口地址（`AUTH_PROVIDER=main-site` 时必填） |
-| `AUTH_UID_FIELDS` | `uid,user_id` | 从用户信息响应里按顺序尝试取用户标识的字段名 |
+| `AUTH_USERINFO_URL` | `https://zhiyou.smzdm.com/user/info/jsonp_get_current` | 主站用户信息接口；主站地址已内置，配了才覆盖 |
+| `AUTH_UID_FIELDS` | `smzdm_id,uid,user_id` | 从用户信息响应里按顺序尝试取用户标识的字段名 |
 | `AUTH_CACHE_SECONDS` | `60` | 身份缓存 |
-| `LOGIN_ORIGIN` | 空 | 主站登录服务的 Web 端 origin，用于 CSP `connect-src` 及登录态校验 |
-| `LOGIN_MOBILE_ORIGIN` | 空 | 主站登录服务的移动端 origin，登录弹窗加载失败时的兜底跳转 |
+| `ALLOW_MOCK_LOGIN` | 空 | 显式设 `1` 才允许 dev/beta 模拟登录；prod 永不生效 |
+| `LOGIN_ORIGIN` | `https://zhiyou.smzdm.com` | 主站登录服务的 Web 端 origin，用于 CSP `connect-src` 及登录态校验；可覆盖 |
+| `LOGIN_MOBILE_ORIGIN` | 同 `LOGIN_ORIGIN` | 主站移动端登录页 origin，登录弹窗加载失败时的兜底跳转 |
 | `LOGIN_FROM_ACTIVITY` | 空 | 极验登录的 `from_activity` 取值 |
 | `BIZ_API_ORIGIN` | 空 | 业务接口默认上游；未配置时业务代理报「没有配置上游地址」 |
 | `BIZ_TIMEOUT_MS` | `15000` | 业务代理超时 |

@@ -15,7 +15,7 @@ async function main() {
   await syncPlatformAdmins()
   const app = await buildApp()
   await app.listen({ port: config.port, host: config.host })
-  app.log.info(`平台服务已启动 :${config.port}，基础域名 ${config.baseDomain}，登录模式 ${config.auth.provider}，模型 ${config.llm.provider}`)
+  app.log.info(`平台服务已启动 :${config.port}，基础域名 ${config.baseDomain}，登录模式 主站，模型 ${config.llm.provider}`)
 
   if (config.roles.has('build'))
     await startBuildWorker()

@@ -229,12 +229,27 @@ async function main() {
   check('游客可读 public_read 集合', r.status === 200, r.json)
   r = await appApi('dev', '/db/votes', { method: 'POST', body: { data: { option: optA } } })
   check('游客写入返回 401（触发全局登录）', r.status === 401 && r.json.error_code === 'LOGIN_REQUIRED', r.json)
-  r = await appApi('dev', '/dev/mock-login', { method: 'POST', body: { mobile: '13800001234' } })
-  check('模拟登录写入共享 cookie', r.status === 200 && devJar.header().includes('app_mock_user'), r.json)
-  r = await appApi('dev', '/auth/me')
-  check('登录后 auth/me 返回用户', r.json?.data?.user?.uid === 'mock_1234', r.json)
+  // 真实登录依赖主站 cookie；开了 ALLOW_MOCK_LOGIN 时用模拟账号，否则用后台测试身份
+  r = await appApi('prod', '/dev/mock-login', { method: 'POST', body: {} })
+  check('线上渠道拒绝模拟登录', r.status === 403, r.json)
+  r = await appApi('dev', '/dev/mock-login', { method: 'POST', body: {} })
+  let testUid = ''
+  if (r.status === 200) {
+    testUid = r.json?.data?.user?.uid ?? ''
+    check('本地开发可模拟登录', testUid.startsWith('dev_'), r.json)
+  }
+  else {
+    check('未开启模拟登录时 dev 渠道也拒绝', r.status === 403, r.json)
+    r = await admin(`/apps/${APP}/preview-url`, { method: 'POST', body: { channel: 'dev', identity: 'test' } })
+    const testUrl = new URL(r.json.data.url)
+    r = await req(DOMAIN, `${testUrl.pathname}${testUrl.search}`, { jar: devJar })
+    check('测试身份票据换 cookie', r.status === 302 && devJar.header().includes(`__Host-app_preview__${APP}`), { status: r.status })
+    r = await appApi('dev', '/auth/me')
+    testUid = r.json?.data?.user?.uid ?? ''
+    check('测试身份 auth/me 返回用户', /^test_/.test(testUid), r.json)
+  }
   r = await appApi('dev', '/db/votes', { method: 'POST', body: { data: { option: optA } } })
-  check('登录后重放写入成功', r.status === 200 && r.json.data._owner === 'mock_1234', r.json)
+  check('登录后重放写入成功', r.status === 200 && r.json.data._owner === testUid, r.json)
   r = await appApi('dev', '/db/votes', { method: 'POST', body: { data: { option: optB } } })
   check('重复投票被唯一约束/配额拒绝', ['DUPLICATE', 'QUOTA_EXCEEDED'].includes(r.json?.error_code), r.json)
   r = await appApi('dev', '/db/votes', { method: 'POST', body: { data: { option: 'not-in-enum' } } })
